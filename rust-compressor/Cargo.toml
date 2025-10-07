@@ -1,0 +1,12 @@
+[package]
+name = "substring_counter"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "substring_counter"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+num-traits = "0.2"

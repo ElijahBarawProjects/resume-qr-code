@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<meta charset="utf-8">
+	<title>RegPack v5.0.4</title>
+
+</head>
+
+<body>
+	<script src="contextDescriptor_browser.js"></script>
+	<script src="stringHelper.js"></script>
+	<script src="packerData.js"></script>
+	<script src="shapeShifter.js"></script>
+	<script src="regPack.js"></script>
+	<script>
+
+		var input = "`HELLO WORLD HELLO WORLD HELLO WORLD HELLO WORLD HELLO WORLD HELLO WORLD HELLO WORLD`"
+
+		function doRegPack(input) {
+
+			// Get rid of comments and empty lines
+			input = input.replace(/([\r\n]|^)\s*\/\/.*|[\r\n]+\s*/g, '');
+
+			// set default options
+			var options = {
+				withMath: false,
+				hash2DContext: false,
+				hashWebGLContext: false,
+				hashAudioContext: false,
+				hashAllObjects: true,
+				contextVariableName: false,
+				contextType: 0,
+				reassignVars: true,
+				varsNotReassigned: "",
+				crushGainFactor: 1,
+				crushLengthFactor: 0,
+				crushCopiesFactor: 0,
+				crushTiebreakerFactor: 1,
+				wrapInSetInterval: false,
+				timeVariableName: false,
+				useES6: true
+			};
+
+			var originalLength = packer.getByteLength(input);
+			var inputList = packer.runPacker(input, options);
+			var methodCount = inputList.length;
+
+			var bestMethod = 0, bestStage = 0, bestCompression = 1e8;
+			for (var i = 0; i < methodCount; ++i) {
+				var packerData = inputList[i];
+				for (var j = 0; j < 4; ++j) {
+					var output = (j == 0 ? packerData.contents : packerData.result[j - 1][1]);
+					var packedLength = packer.getByteLength(output);
+					if (packedLength < bestCompression) {
+						bestCompression = packedLength;
+						bestMethod = i;
+						bestStage = j;
+					}
+				}
+			}
+			var bestOutput = inputList[bestMethod];
+
+			if (bestStage > 0) {
+				return bestOutput.result[bestStage - 1][1]
+			}
+			return input
+		}
+
+
+		onload = function () {
+			const result = doRegPack(input);
+			console.log(result);
+			document.body.innerHTML = `<p>${input}<p>${result}`;
+		}
+	</script>
+</body>
+
+</html>

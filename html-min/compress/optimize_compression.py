@@ -16,6 +16,7 @@ BASE_SCRIPT_LEN = len(
         word_string="", compressed="", num_iters="", max_char_code=""
     )
 )
+MULTI_KEY_SCRIPT_TEMPLATE = '<script>onload=()=>{{let w=`{word_string}`.split("|"),h={compressed};for(i=0;i<{num_iters};)h=h.replaceAll("~"+String.fromCharCode({max_char_code}-i),w[i++]);document.body.innerHTML=h}};</script>'
 ALLOW_OVERLAPS = False
 CHECK_COLISSION = False
 VERBOSE = True
@@ -23,17 +24,21 @@ LOWERCASE = "abcdefghijklmnopqrstuvwxyz"
 UPPERCASE = LOWERCASE.upper()
 NUMERIC = "0123456789"
 ALPHANUMERIC = LOWERCASE + UPPERCASE + NUMERIC
+START = "\""
 # this range includes '`', which we can never use as that's our string encloser;
 # so we will do a redundant substitution
-PRINTABLE_UP_TO_BAR = "".join(
-    [chr(i) for i in range(ord("0"), ord("}") + 1)]
+PRINTABLE_UP_TO_TILDE = "".join(
+    [chr(i) for i in range(ord(START), ord("~"))] # "(" is goaded
 )  # we don't want '|' to appear inside the words string, but we can use it as our last substitutor
 WORDLIST_DELIM = "|"  # used to delimit substrings in the wordlist, which is used to map {KEY_PREFIX+sym => value}
 KEY_PREFIX = "~"  # prepended to turn a symbol into a key
 QUOTES = "`"
 BACKSLASH = "\\"
-# can't occur inside either word list or compressed
+# can't occur inside either word list or compressed due to JS encoding
 DISALLOWED = [QUOTES, BACKSLASH]
+# key prefixes (['~']) can't occur in the HTML
+# the wordlist delimiter, '|', can appear in the original HTML but substrings
+# containing that can't appear in the wordlist
 
 # class Compressor:
 #     def __init__(self, quote_char: str, key_prefix: str, wordlist_delim: str):
@@ -41,7 +46,10 @@ DISALLOWED = [QUOTES, BACKSLASH]
 #         self.key_prefix = key_prefix
 #         self.wordlist_delim = wordlist_delim
 
-
+'.split().join()'
+'.replaceAll(,)'
+'r=a=>a.replaceAll'
+'r(a)'
 class IdMaker:
     """
     Iterator which provides keys for substitution
@@ -50,7 +58,7 @@ class IdMaker:
     def __init__(
         self,
         special="~",
-        symbols=PRINTABLE_UP_TO_BAR,
+        symbols=PRINTABLE_UP_TO_TILDE,
     ):
         self.special = special
         self.symbols = symbols
@@ -174,7 +182,7 @@ def generate_compression_script(
 ):
     """Generate optimized JavaScript compression"""
     word_list = words.copy()
-    word_string = "|".join(reversed(word_list))
+    word_string = WORDLIST_DELIM.join(reversed(word_list))
     letters = "".join(reversed(symbols))
 
     if VERBOSE:
@@ -250,7 +258,9 @@ def greedy(txt: str):
             (
                 (count, substring, get_savings(substring, count, key, sym))
                 for substring, count in counts.items()
-                if count > 1 and len(substring) > 2 and "|" not in substring
+                if count > 1
+                and len(substring) > 2
+                and WORDLIST_DELIM not in substring
             ),
         )
 
@@ -345,7 +355,7 @@ def main():
 
     input_stream, output_stream = get_io(args)
     CHECK_COLISSION = args.check_collisions
-    VERBOSE = args.verbose
+    # VERBOSE = args.verbose
     try:
         html = input_stream.read()
         text = extract_compressible_content(html)

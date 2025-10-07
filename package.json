@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "regpack": "^5.0.1"
+  }
+}
