@@ -5,6 +5,7 @@ use num_traits::{ops::overflowing::OverflowingAdd, CheckedMul};
 use crate::one_zero::OneZero;
 
 // wrapper class
+#[derive(Clone, Copy)]
 pub struct Mod<T> {
     modulus: T,
 }

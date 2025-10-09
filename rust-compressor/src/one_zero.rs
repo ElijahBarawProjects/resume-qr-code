@@ -1,5 +1,3 @@
-use std::collections::binary_heap::Iter;
-
 pub trait OneZero {
     fn one() -> Self;
     fn zero() -> Self;
@@ -7,13 +5,13 @@ pub trait OneZero {
 
 impl<T> OneZero for T
 where
-    T: From<u8>,
+    T: TryFrom<u8>,
 {
     fn one() -> Self {
-        T::from(1)
+        T::from(1.try_into().ok().unwrap())
     }
 
     fn zero() -> Self {
-        T::from(0)
+        T::from(0.try_into().ok().unwrap())
     }
 }

@@ -1,14 +1,18 @@
 use num_traits::{ops::overflowing::OverflowingAdd, CheckedMul};
-use std::ops::{Add, BitAnd, Mul, Rem, Shr, Sub};
+use std::{
+    ops::{Add, BitAnd, Mul, Rem, Shr, Sub},
+};
 
-use crate::{modular::Mod, one_zero::OneZero};
+use crate::{interface::WindowHasher, modular::Mod, one_zero::OneZero};
 
 // Mersenne primes
 pub const DEFAULT_MOD_U64: u64 = 1 << 61 - 1;
+#[allow(unused)] // TODO REMOVE
 pub const DEFAULT_MOD_U32: u32 = 1 << 31 - 1;
 // prime & works well for ascii
 pub const DEFAULT_BASE: u16 = 257;
 
+#[derive(Clone, Copy)]
 pub struct _RollingHash<'a, TData, THash>
 where
     TData: Copy,
@@ -23,6 +27,7 @@ where
     highest_power: THash, // (base ^ (window_size - 1)) mod modulus
 }
 
+#[derive(Clone, Copy)]
 pub enum RollingHash<'a, TData, THash>
 where
     TData: Copy,
@@ -164,10 +169,83 @@ pub trait HashType: _HashType + OneZero {}
 
 // Automatically impliment HashType for all types which can be created from u8
 // and implement _HashType (including all base integral types)
-impl<T> HashType for T where T: From<u8> + _HashType {}
+impl<T> HashType for T where T: TryFrom<u8> + _HashType {}
+
+#[derive(Clone, Copy)]
+struct WrappedRollingHash<THash: HashType> {
+    base: THash,
+    modulus: THash,
+}
 
 #[cfg(test)]
-mod tests {
-    // check for overlapping
-    // check against reference rolling hash
+use crate::interface::tests::{
+    WindowHasherDataSizeTests,
+    WindowHasherDataTests,
+    WindowHasherWindowSizeTests,
+    WindowHasherModulusTests,
+    WindowHasherLargeUnsignedTests,
+    WindowHasherLargeSignedTests,
+    WindowhasherBoundedTDataTests,
+    WindowHasherBoundedTHashTests,
+    WindowHasherSignedDataTests
+};
+#[cfg(test)]
+use tested_trait::test_impl;
+#[cfg_attr(test, test_impl(
+    WrappedRollingHash<u8>: WindowHasher<u8, u8>, 
+    WrappedRollingHash<i8>: WindowHasher<i8, i8>, 
+    WrappedRollingHash<u32>: WindowHasher<u32, u8>,
+    WrappedRollingHash<u32>: WindowHasherDataSizeTests<u32, u32>,
+    WrappedRollingHash<u32>: WindowHasherDataTests<u32, u32>,
+    WrappedRollingHash<u32>: WindowHasherWindowSizeTests<u32, u32>,
+    WrappedRollingHash<u32>: WindowHasherModulusTests<u32, u32>,
+    WrappedRollingHash<u32>: WindowHasherLargeUnsignedTests<u32, u32>,
+    WrappedRollingHash<i32>: WindowHasherLargeSignedTests<i32, i32>,
+    WrappedRollingHash<u32>: WindowhasherBoundedTDataTests<u32, u32>,
+    WrappedRollingHash<u32>: WindowHasherBoundedTHashTests<u32, u32>,
+    WrappedRollingHash<i32>: WindowHasherSignedDataTests<i32, i32>,
+))]
+impl<TData, THash> WindowHasher<THash, TData> for WrappedRollingHash<THash>
+where
+    TData: Copy,
+    THash: From<TData> + HashType,
+{
+    fn new(base: THash, modulus: THash) -> Result<Self, crate::interface::HasherErr> {
+        let base_test: Result<RollingHash<'_, TData, THash>, &'static str> =
+            RollingHash::new(&[], 0, base, THash::one());
+        if let Err(e) = base_test {
+            return Err(crate::interface::HasherErr::InvalidBase(e));
+        }
+
+        let modulus_test: Result<RollingHash<'_, TData, THash>, &'static str> =
+            RollingHash::new(&[], 0, THash::one(), modulus);
+        if let Err(e) = modulus_test {
+            return Err(crate::interface::HasherErr::InvalidModulus(e));
+        }
+
+        Ok(WrappedRollingHash { base, modulus })
+    }
+
+    fn hash<'data>(&self, data: &'data [TData]) -> THash {
+        // we've already validated base, mod
+
+        if data.len() == 0 {
+            return THash::zero();
+        }
+
+        let mut hasher = RollingHash::new(data, data.len(), self.base, self.modulus).unwrap();
+        hasher.next().unwrap().0
+    }
+
+    fn sliding_hash_owned<'data>(
+        self,
+        data: &'data [TData],
+        window_size: usize,
+    ) -> impl Iterator<Item = (THash, usize)> + 'data
+    where
+        Self: 'data,
+    {
+        // we've already validated base, mod
+        RollingHash::new(data, window_size, self.base, self.modulus).unwrap()
+    }
 }
