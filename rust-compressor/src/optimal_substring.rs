@@ -1,3 +1,5 @@
+#![allow(dead_code)] // TODO: fill in
+
 // def max_score(
 //     s: str, score_fn: Callable, allow_overlaps: bool = True, max_len: int = -1
 // ) -> str:
@@ -21,7 +23,6 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     hash::Hash,
-    net::ToSocketAddrs,
     ops::{Add, Mul, Sub},
 };
 
@@ -32,7 +33,7 @@ use crate::{
     rolling_hash::{HashType, RollingHash},
 };
 
-trait _TCount: Copy + PartialOrd + Add<Output = Self> + Debug {}
+pub trait _TCount: Copy + PartialOrd + Add<Output = Self> + Debug {}
 impl<T> _TCount for T where T: Copy + PartialOrd + Add<Output = T> + Debug {}
 pub trait TCount: _TCount {
     fn one() -> Self;
@@ -245,7 +246,7 @@ fn max_score<
 
         match (res, max) {
             (None, _) => continue,
-            (Some((start, count)), m) => {
+            (Some((start, count)), _m) => {
                 let slice = s.get(start..start + len).expect("");
                 let new_score = score_fn(slice, len, count);
                 match max {
@@ -347,7 +348,6 @@ pub fn best_substring<
         }),
     }
 }
-
 
 #[cfg(test)]
 mod tests {

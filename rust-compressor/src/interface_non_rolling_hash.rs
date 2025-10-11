@@ -39,7 +39,10 @@ use crate::interface::tests::{
     WindowHasherLargeSignedTests,
     WindowhasherBoundedTDataTests,
     WindowHasherBoundedTHashTests,
-    WindowHasherSignedDataTests
+    WindowHasherSignedDataTests,
+    WindowHasherErrorHandlingTests,
+    WindowHasherIteratorTests,
+    WindowHasherHashPropertyTests
 };
 
 #[cfg_attr(test, test_impl(
@@ -55,6 +58,12 @@ use crate::interface::tests::{
     InterfaceHasher: WindowhasherBoundedTDataTests<u32, u32>,
     InterfaceHasher: WindowHasherBoundedTHashTests<u32, u32>,
     InterfaceHasher: WindowHasherSignedDataTests<u32, i32>,
+    InterfaceHasher: WindowHasherErrorHandlingTests<i32, i8>,
+    InterfaceHasher: WindowHasherErrorHandlingTests<i32, u8>,
+    InterfaceHasher: WindowHasherIteratorTests<u32, u8>,
+    InterfaceHasher: WindowHasherIteratorTests<i32, i8>,
+    InterfaceHasher: WindowHasherHashPropertyTests<u32, u8>,
+    InterfaceHasher: WindowHasherHashPropertyTests<i32, i16>,
 ))]
 impl<THash, TData> WindowHasher<THash, TData> for InterfaceHasher
 where

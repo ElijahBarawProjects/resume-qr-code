@@ -3,7 +3,7 @@ use std::{
     ops::{Add, BitAnd, Mul, Rem, Shr, Sub},
 };
 
-use crate::{interface::WindowHasher, modular::Mod, one_zero::OneZero};
+use crate::{interface::{WindowHasher}, modular::Mod, one_zero::OneZero};
 
 // Mersenne primes
 pub const DEFAULT_MOD_U64: u64 = 1 << 61 - 1;
@@ -48,6 +48,10 @@ where
         base: THash,
         modulus: THash,
     ) -> Result<Self, &'static str> {
+        if base <= THash::zero() {
+            return Err("Non-positive base");
+        }
+        
         let _mod: Mod<THash>;
         match Mod::new(modulus) {
             Some(modulus) => _mod = modulus,
@@ -187,7 +191,10 @@ use crate::interface::tests::{
     WindowHasherLargeSignedTests,
     WindowhasherBoundedTDataTests,
     WindowHasherBoundedTHashTests,
-    WindowHasherSignedDataTests
+    WindowHasherSignedDataTests,
+    WindowHasherErrorHandlingTests,
+    WindowHasherIteratorTests,
+    WindowHasherHashPropertyTests,
 };
 #[cfg(test)]
 use tested_trait::test_impl;
@@ -197,6 +204,7 @@ use tested_trait::test_impl;
     WrappedRollingHash<u32>: WindowHasher<u32, u8>,
     WrappedRollingHash<u32>: WindowHasherDataSizeTests<u32, u32>,
     WrappedRollingHash<u32>: WindowHasherDataTests<u32, u32>,
+    WrappedRollingHash<i32>: WindowHasherDataTests<i32, u8>,
     WrappedRollingHash<u32>: WindowHasherWindowSizeTests<u32, u32>,
     WrappedRollingHash<u32>: WindowHasherModulusTests<u32, u32>,
     WrappedRollingHash<u32>: WindowHasherLargeUnsignedTests<u32, u32>,
@@ -204,6 +212,12 @@ use tested_trait::test_impl;
     WrappedRollingHash<u32>: WindowhasherBoundedTDataTests<u32, u32>,
     WrappedRollingHash<u32>: WindowHasherBoundedTHashTests<u32, u32>,
     WrappedRollingHash<i32>: WindowHasherSignedDataTests<i32, i32>,
+    WrappedRollingHash<i32>: WindowHasherSignedDataTests<i32, i8>,
+    WrappedRollingHash<i32>: WindowHasherErrorHandlingTests<i32, i8>,
+    WrappedRollingHash<u32>: WindowHasherIteratorTests<u32, u8>,
+    WrappedRollingHash<i32>: WindowHasherIteratorTests<i32, i8>,
+    WrappedRollingHash<u32>: WindowHasherHashPropertyTests<u32, u8>,
+    WrappedRollingHash<i32>: WindowHasherHashPropertyTests<i32, i16>,
 ))]
 impl<TData, THash> WindowHasher<THash, TData> for WrappedRollingHash<THash>
 where

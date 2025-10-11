@@ -10,7 +10,7 @@ use std::ops::Div;
 #[cfg(test)]
 use crate::rolling_hash::HashType;
 
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: remove
 #[derive(Debug)]
 pub enum HasherErr {
     InvalidBase(&'static str),
@@ -108,11 +108,11 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
     }
 
     /**
-     * Tests
+     * Generic Tests
      */
 
     #[test]
-    fn test_type_boundaries()
+    fn _test_type_boundaries()
     where
         TData: Bounded + TryFrom<u8>,
         THash: Div<Output = THash> + Bounded + TryFrom<u8> + PartialOrd + Copy,
@@ -121,7 +121,7 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
     }
 
     #[test]
-    fn test_new_function_generic()
+    fn _test_new_function_generic()
     where
         THash: crate::rolling_hash::HashType,
         TData: Into<num_bigint::BigInt>,
@@ -146,6 +146,7 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
     ) where
         THash: HashType + std::fmt::Debug,
     {
+        // sliding_hash_owned, slow_sliding_hash_owned must have identical results
         let hasher = Self::new(base, modulus).unwrap();
 
         let results1: Vec<_> = hasher
@@ -157,6 +158,32 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
         assert_eq!(
             results1, results2,
             "sliding_hash_owned and slow_sliding_hash_owned should produce identical results"
+        );
+    }
+
+    #[cfg(test)]
+    fn test_slow_sliding_hash_against_hash(
+        base: THash,
+        modulus: THash,
+        data: &[TData],
+        window_size: usize,
+    ) where
+        THash: HashType + std::fmt::Debug,
+    {
+        // sliding_hash_owned() must match repeatedly applying hash()
+
+        let hasher = Self::new(base, modulus).unwrap();
+
+        let results1: Vec<_> = hasher.slow_sliding_hash(data, window_size).collect();
+        let results2: Vec<_> = data
+            .windows(window_size)
+            .enumerate()
+            .map(|(start, window)| (hasher.hash(window), start))
+            .collect();
+
+        assert_eq!(
+            results1, results2,
+            "slow_sliding_hash must match windowed hash()'s"
         );
     }
 
@@ -184,9 +211,21 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
 #[cfg(test)]
 pub mod tests {
 
-    use tested_trait::tested_trait;
+    macro_rules! expect_from {
+        ($num:expr) => {
+            $num.try_into().ok().unwrap()
+        };
+    }
 
+    fn to_data_vec<TBase, TData>(data: &[TBase]) -> Vec<TData>
+    where
+        TData: TryFrom<TBase>,
+        TBase: Clone,
+    {
+        data.iter().map(|d| expect_from!(d.to_owned())).collect()
+    }
     use std::fmt::Debug;
+    use tested_trait::tested_trait;
 
     use crate::rolling_hash::HashType;
 
@@ -226,12 +265,6 @@ pub mod tests {
         assert_eq!(unchecked_make_number::<i32, _>(-10), -10);
         assert_eq!(unchecked_make_number::<i32, _>(0), 0);
         assert_eq!(unchecked_make_number::<i32, _>(1), 1);
-    }
-
-    macro_rules! expect_from {
-        ($num:expr) => {
-            $num.try_into().ok().unwrap()
-        };
     }
 
     /**
@@ -460,6 +493,26 @@ pub mod tests {
         }
 
         #[test]
+        fn _test_slow_sliding_hash_matches_hash_unsigned()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let data: Vec<_> = (0..=1000i32)
+                .map(|x| expect_from!((x % 255) as u8))
+                .collect();
+            let modulus = unchecked_make_number(5);
+            let base = unchecked_make_number(127);
+            let window_size = 3;
+
+            // slow_sliding hash should match hash
+            Self::test_slow_sliding_hash_against_hash(base, modulus, &data, window_size);
+        }
+
+        // _test_sliding_hash_consistency_unsigned, _test_slow_sliding_hash_matches_hash_unsigned together establish:
+        // sliding_hash_owned() <=> slow_sliding_hash_owned() <=> window(window_size).hash()
+
+        #[test]
         fn _test_sliding_hash_owned_comprehensive()
         where
             THash: HashType + Debug,
@@ -479,6 +532,38 @@ pub mod tests {
             assert_eq!(results[0], (unchecked_make_number((123 % 97) as u8), 0));
             assert_eq!(results[1], (unchecked_make_number((234 % 97) as u8), 1));
             assert_eq!(results[2], (unchecked_make_number((345 % 97) as u8), 2));
+        }
+
+        #[test]
+        fn _test_data_order_matters()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let order_1 = to_data_vec(&vec![1, 2, 3]);
+            let order_2 = to_data_vec(&vec![1, 3, 1]);
+            let base = unchecked_make_number(10u32);
+            let modulus = unchecked_make_number(97u32);
+            let hasher = Self::new(base, modulus).unwrap();
+            assert_ne!(hasher.clone().hash(&order_1), hasher.clone().hash(&order_2))
+        }
+
+        #[test]
+        fn _test_data_cascade()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let range_base: Vec<_> = (0u8..=100).into_iter().collect();
+            let range_1 = to_data_vec(&range_base);
+            let mut range_2 = to_data_vec(&range_base);
+            range_2[42] = expect_from!(1);
+            let range_2 = range_2;
+
+            let base = unchecked_make_number(10u32);
+            let modulus = unchecked_make_number(97u32);
+            let hasher = Self::new(base, modulus).unwrap();
+            assert_ne!(hasher.clone().hash(&range_1), hasher.clone().hash(&range_2))
         }
     }
 
@@ -725,7 +810,63 @@ pub mod tests {
     where
         Self: WindowHasher<THash, TData>,
     {
-        fn _test_modulus_of(original_mod: u8)
+        #[test]
+        fn _test_modulus_equals_base()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let modulus: THash = unchecked_make_number(127);
+            let base: THash = unchecked_make_number(127);
+            let data: Vec<u8> = (0u8..=100).into_iter().collect();
+            let data: Vec<TData> = to_data_vec(&data);
+            let window_size: usize = 10;
+            let hasher = Self::new(base, modulus).unwrap();
+            let results: Vec<_> = hasher.sliding_hash(&data, window_size).collect();
+            assert_eq!(results.len(), data.len() - window_size + 1);
+
+            results.iter().for_each(|(hash, index)| {
+                let last_elem_of_window = index + window_size - 1; // since data steps by one
+                let last_elem_of_window: THash = unchecked_make_number(last_elem_of_window);
+                // since the base is equal to the mod, the rolling hash is just the last element in the window
+                // a + m * b + m^2 * c % m = a
+                assert_eq!(last_elem_of_window, *hash)
+            });
+        }
+
+        #[test]
+        fn _test_modulus_less_than_base()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            // shared
+            let window_size: usize = 10;
+            let data: Vec<u8> = (0u8..=100).into_iter().collect();
+            let data: Vec<TData> = to_data_vec(&data);
+            let fundamental_base = 127;
+            let fundamental_mod = 97;
+
+            // base > modulus
+            let base_1: THash = unchecked_make_number(fundamental_base);
+            let modulus_1: THash = unchecked_make_number(fundamental_mod);
+            let hasher_1 = Self::new(base_1, modulus_1).unwrap();
+            let results_1: Vec<_> = hasher_1.sliding_hash(&data, window_size).collect();
+            assert_eq!(results_1.len(), data.len() - window_size + 1);
+
+            // base = base % modulus
+            let base_2 = unchecked_make_number(fundamental_base % fundamental_mod);
+            let modulus_2: THash = unchecked_make_number(fundamental_mod);
+            let hasher_2 = Self::new(base_2, modulus_2).unwrap();
+            let results_2: Vec<_> = hasher_2.sliding_hash(&data, window_size).collect();
+            assert_eq!(results_2.len(), data.len() - window_size + 1);
+
+            // this should have identical results due to:
+            // a + b x + c x^2 % m == a % m + b % m * (x % m) + c % m * (x^2 % m)
+            assert_eq!(results_1, results_2)
+        }
+
+        fn test_modulus_of(original_mod: u8)
         where
             THash: HashType + Debug,
             TData: TryFrom<u8>,
@@ -766,7 +907,7 @@ pub mod tests {
             THash: HashType + Debug,
             TData: TryFrom<u8>,
         {
-            <Self as WindowHasherModulusTests<THash, TData>>::_test_modulus_of(2);
+            <Self as WindowHasherModulusTests<THash, TData>>::test_modulus_of(2);
         }
 
         #[test]
@@ -775,7 +916,7 @@ pub mod tests {
             THash: HashType + Debug,
             TData: TryFrom<u8>,
         {
-            <Self as WindowHasherModulusTests<THash, TData>>::_test_modulus_of(1);
+            <Self as WindowHasherModulusTests<THash, TData>>::test_modulus_of(1);
         }
 
         #[test]
@@ -784,7 +925,7 @@ pub mod tests {
             THash: HashType + Debug,
             TData: TryFrom<u8>,
         {
-            <Self as WindowHasherModulusTests<THash, TData>>::_test_modulus_of(5);
+            <Self as WindowHasherModulusTests<THash, TData>>::test_modulus_of(5);
         }
 
         #[test]
@@ -813,7 +954,7 @@ pub mod tests {
         Self: WindowHasher<THash, TData>,
     {
         #[test]
-        fn _test_min_value_data_signed() {
+        fn _test_bounded_min_value_data_signed() {
             let data = vec![TData::min_value(), TData::min_value(), TData::min_value()];
 
             // hash
@@ -872,6 +1013,33 @@ pub mod tests {
             let hasher = Self::new(base, modulus).unwrap();
             let hash = hasher.hash(&data);
             assert!(hash < modulus);
+        }
+
+        #[test]
+        fn _test_bounded_large_base() {
+            let test = |first: u16, second: u16| {
+                // large base, (legit maximum)
+                let modulus: THash = expect_from!(257);
+                let base = THash::max_value();
+                let hasher = Self::new(base, modulus).unwrap();
+                let data = to_data_vec(&vec![first, second]);
+                let window_size = 2;
+                let result: Vec<_> = hasher.sliding_hash(&data, window_size).collect();
+                assert!(result.len() == 1);
+                let first: THash = unchecked_make_number(first);
+                let second = unchecked_make_number(second);
+                let expected = (
+                    ((first * (THash::max_value() % modulus) % modulus) + second) % modulus,
+                    0,
+                );
+                assert!(result[0] == expected);
+            };
+
+            // this hash's add op would overflow
+            test(1, 2);
+
+            // this hash's mul op would overflow
+            test(2, 1);
         }
     }
 
@@ -1202,9 +1370,8 @@ pub mod tests {
     where
         Self: WindowHasher<THash, TData>,
     {
-        // TODO: this isn't passing
         #[test]
-        fn test_negative_modulus()
+        fn _test_negative_modulus()
         where
             THash: HashType + Debug + TryFrom<i32>,
             TData: TryFrom<i16>,
@@ -1225,6 +1392,345 @@ pub mod tests {
         }
     }
 
+    use super::HasherErr;
+
+    /**
+     * Error Handling Tests
+     */
+    #[tested_trait]
+    pub trait WindowHasherErrorHandlingTests<THash, TData>
+    where
+        Self: WindowHasher<THash, TData>,
+    {
+        #[test]
+        fn _test_new_error_zero_modulus()
+        where
+            THash: HashType + Debug,
+        {
+            let base = THash::one();
+            let modulus = THash::zero();
+            let result = Self::new(base, modulus);
+            assert!(result.is_err());
+            if let Err(HasherErr::InvalidModulus(_)) = result {
+                // Expected error type
+            } else {
+                panic!("Expected InvalidModulus error for zero modulus");
+            }
+        }
+
+        #[test]
+        fn _test_new_error_zero_base()
+        where
+            THash: HashType + Debug,
+        {
+            let base = THash::zero();
+            let modulus = THash::one();
+            let result = Self::new(base, modulus);
+            assert!(result.is_err());
+            if let Err(HasherErr::InvalidBase(_)) = result {
+                // Expected error type
+            } else {
+                panic!("Expected InvalidBase error for zero base");
+            }
+        }
+
+        #[test]
+        fn _test_new_error_negative_base()
+        where
+            THash: HashType + Debug,
+        {
+            let base = THash::zero() - THash::one(); // -1
+            let modulus = unchecked_make_number(1000000007i32);
+            let result = Self::new(base, modulus);
+            assert!(result.is_err());
+            if let Err(HasherErr::InvalidBase(_)) = result {
+                // Expected error type
+            } else {
+                panic!("Expected InvalidBase error for negative base");
+            }
+        }
+
+        #[test]
+        fn _test_single_sliding_hash_error_propagation_base()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let data: Vec<_> = vec![1u8, 2, 3]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let base = THash::zero(); // Invalid base
+            let modulus = THash::one();
+            let result = Self::single_sliding_hash(base, modulus, &data, 2);
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn _test_single_sliding_hash_error_propagation_modulus()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let data: Vec<_> = vec![1u8, 2, 3]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let base = THash::one();
+            let modulus = THash::zero(); // Invalid modulus
+            let result = Self::single_sliding_hash(base, modulus, &data, 2);
+            assert!(result.is_err());
+        }
+    }
+
+    /**
+     * Iterator Tests
+     */
+    #[tested_trait]
+    pub trait WindowHasherIteratorTests<THash, TData>
+    where
+        Self: WindowHasher<THash, TData>,
+    {
+        #[test]
+        fn _test_iterator_count()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let data: Vec<_> = vec![1u8, 2, 3, 4, 5]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let base = unchecked_make_number(257u32);
+            let modulus = unchecked_make_number(1000000007u32);
+
+            let test_cases = vec![
+                (1, 5), // window_size 1 should produce 5 results
+                (2, 4), // window_size 2 should produce 4 results
+                (3, 3), // window_size 3 should produce 3 results
+                (5, 1), // window_size 5 should produce 1 result
+                (6, 0), // window_size 6 should produce 0 results
+            ];
+
+            for (window_size, expected_count) in test_cases {
+                let results: Vec<_> = Self::single_sliding_hash(base, modulus, &data, window_size)
+                    .unwrap()
+                    .collect();
+                assert_eq!(
+                    results.len(),
+                    expected_count,
+                    "Window size {} should produce {} results",
+                    window_size,
+                    expected_count
+                );
+            }
+        }
+
+        #[test]
+        fn _test_iterator_indices_sequential()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let data: Vec<_> = vec![10u8, 20, 30, 40, 50, 60]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let base = unchecked_make_number(100u32);
+            let modulus = unchecked_make_number(1000000007u32);
+            let window_size = 3;
+
+            let results: Vec<_> = Self::single_sliding_hash(base, modulus, &data, window_size)
+                .unwrap()
+                .collect();
+
+            // Verify that start indices are sequential starting from 0
+            for (i, (_, start_idx)) in results.iter().enumerate() {
+                assert_eq!(
+                    *start_idx, i,
+                    "Start index at position {} should be {}",
+                    i, i
+                );
+            }
+
+            // Verify we got the expected number of results
+            assert_eq!(results.len(), data.len() - window_size + 1);
+        }
+
+        #[test]
+        fn _test_iterator_deterministic()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let data: Vec<_> = vec![7u8, 14, 21, 28]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let base = unchecked_make_number(256u32);
+            let modulus = unchecked_make_number(1000000007u32);
+            let window_size = 2;
+
+            // Collect results multiple times
+            let results1: Vec<_> = Self::single_sliding_hash(base, modulus, &data, window_size)
+                .unwrap()
+                .collect();
+            let results2: Vec<_> = Self::single_sliding_hash(base, modulus, &data, window_size)
+                .unwrap()
+                .collect();
+            let results3: Vec<_> = Self::single_sliding_hash(base, modulus, &data, window_size)
+                .unwrap()
+                .collect();
+
+            assert_eq!(
+                results1, results2,
+                "Iterator should produce same results on second invocation"
+            );
+            assert_eq!(
+                results2, results3,
+                "Iterator should produce same results on third invocation"
+            );
+        }
+
+        #[test]
+        fn _test_iterator_empty_cases()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let base = unchecked_make_number(257u32);
+            let modulus = unchecked_make_number(1000000007u32);
+
+            // |data| = 0
+            let empty_data: Vec<TData> = vec![];
+            let results: Vec<_> = Self::single_sliding_hash(base, modulus, &empty_data, 1)
+                .unwrap()
+                .collect();
+            assert_eq!(results.len(), 0, "Empty data should produce empty iterator");
+
+            // ws > |data|
+            let data: Vec<_> = vec![1u8, 2u8]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let results: Vec<_> = Self::single_sliding_hash(base, modulus, &data, 10)
+                .unwrap()
+                .collect();
+            assert_eq!(
+                results.len(),
+                0,
+                "Window larger than data should produce empty iterator"
+            );
+
+            // ws = 0
+            let data: Vec<_> = vec![1u8, 2u8, 3u8]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let results: Vec<_> = Self::single_sliding_hash(base, modulus, &data, 0)
+                .unwrap()
+                .collect();
+            assert_eq!(
+                results.len(),
+                0,
+                "Zero window size should produce empty iterator"
+            );
+        }
+    }
+
+    /**
+     * Hash Property Tests
+     */
+    #[tested_trait]
+    pub trait WindowHasherHashPropertyTests<THash, TData>
+    where
+        Self: WindowHasher<THash, TData>,
+    {
+        #[test]
+        fn _test_hash_range_validation()
+        where
+            THash: HashType + Debug + PartialOrd + TryFrom<u16>,
+            TData: TryFrom<u8>,
+        {
+            let data: Vec<_> = vec![15u8, 42, 78, 99, 123, 200, 255]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let base = unchecked_make_number(257u32);
+            let modulus = unchecked_make_number(1009u32);
+
+            let hasher = Self::new(base, modulus).unwrap();
+
+            // Test hash() output is in valid range
+            let hash = hasher.hash(&data);
+            assert!(
+                hash >= unchecked_make_number(0),
+                "Hash must be non-negative"
+            );
+            assert!(hash < modulus, "Hash must be less than modulus");
+
+            // Test all sliding hash outputs are in valid range
+            let results: Vec<_> = Self::single_sliding_hash(base, modulus, &data, 3)
+                .unwrap()
+                .collect();
+
+            for (hash_val, idx) in results {
+                assert!(
+                    hash_val >= unchecked_make_number(0),
+                    "Hash at index {} must be non-negative",
+                    idx
+                );
+                assert!(
+                    hash_val < modulus,
+                    "Hash at index {} must be less than modulus",
+                    idx
+                );
+            }
+        }
+
+        #[test]
+        fn _test_hash_different_data_different_hashes()
+        where
+            THash: HashType + Debug,
+            TData: TryFrom<u8>,
+        {
+            let base = unchecked_make_number(257u32);
+            let modulus = unchecked_make_number(1000000007u32);
+            let hasher = Self::new(base, modulus).unwrap();
+
+            // these hashes should have different values
+            let data1: Vec<_> = vec![1u8, 2, 3]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let data2: Vec<_> = vec![4u8, 5, 6]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect();
+            let data3: Vec<_> = vec![3u8, 2, 1]
+                .into_iter()
+                .map(|x| expect_from!(x))
+                .collect(); // Reversed data1
+
+            let hash1 = hasher.hash(&data1);
+            let hash2 = hasher.clone().hash(&data2);
+            let hash3 = hasher.hash(&data3);
+
+            assert_ne!(
+                hash1, hash2,
+                "Different data should produce different hashes"
+            );
+            assert_ne!(
+                hash1, hash3,
+                "Order matters: [1,2,3] should differ from [3,2,1]"
+            );
+            assert_ne!(
+                hash2, hash3,
+                "Different data should produce different hashes"
+            );
+        }
+    }
+
     // Automatically implement WindowHasherTests
 
     impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherDataSizeTests<THash, TData> for T {}
@@ -1240,6 +1746,15 @@ pub mod tests {
     impl<TH: Bounded, TD, T: WindowHasher<TH, TD>> WindowHasherBoundedTHashTests<TH, TD> for T {}
     impl<THash, TData: Signed, T: WindowHasher<THash, TData>>
         WindowHasherSignedDataTests<THash, TData> for T
+    {
+    }
+    impl<THash: HashType + Signed, TData, T: WindowHasher<THash, TData>>
+        WindowHasherErrorHandlingTests<THash, TData> for T
+    {
+    }
+    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherIteratorTests<THash, TData> for T {}
+    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherHashPropertyTests<THash, TData>
+        for T
     {
     }
 }
