@@ -176,7 +176,7 @@ pub trait HashType: _HashType + OneZero {}
 impl<T> HashType for T where T: TryFrom<u8> + _HashType {}
 
 #[derive(Clone, Copy)]
-struct WrappedRollingHash<THash: HashType> {
+pub struct WrappedRollingHash<THash: HashType> {
     base: THash,
     modulus: THash,
 }
@@ -248,7 +248,9 @@ where
         }
 
         let mut hasher = RollingHash::new(data, data.len(), self.base, self.modulus).unwrap();
-        hasher.next().unwrap().0
+        let res = hasher.next().unwrap().0;
+        assert!(hasher.next() == None);
+        res
     }
 
     fn sliding_hash_owned<'data>(

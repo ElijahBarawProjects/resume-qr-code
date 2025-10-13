@@ -1,14 +1,14 @@
 use num_bigint::{BigInt, TryFromBigIntError};
 use rolling_hash_rs;
 
+use rolling_hash_rs::interface::WindowHasher;
 use rolling_hash_rs::{
-    non_rolling_hash::NonRollingHash,
     optimal_substring::best_substring,
     rolling_hash::{HashType, DEFAULT_BASE, DEFAULT_MOD_U64},
 };
 
-use rolling_hash_rs::rolling_hash;
-use rolling_hash_rs::non_rolling_hash;
+use rolling_hash_rs::interface_non_rolling_hash::InterfaceHasher;
+use rolling_hash_rs::rolling_hash::WrappedRollingHash;
 
 fn _test_rolling_hash_str_once<TH, TD>(text: &Vec<TD>, window_size: usize, base: TH, modulus: TH)
 where
@@ -16,13 +16,21 @@ where
     TD: Copy + Into<BigInt>,
 {
     // Get rolling hash results
-    let rolling_results: Vec<_> = rolling_hash::RollingHash::new(&text, window_size, base, modulus)
+
+    let rolling_results: Vec<_> =
+        <WrappedRollingHash<TH> as rolling_hash_rs::interface::WindowHasher<TH, TD>>::new(
+            base, modulus,
+        )
         .unwrap()
+        .sliding_hash_owned(text, window_size)
         .collect();
 
     // Calculate expected results manually
     let expected: Vec<_> =
-        non_rolling_hash::NonRollingHash::new(&text, window_size, base, modulus).collect();
+        <InterfaceHasher as rolling_hash_rs::interface::WindowHasher<TH, TD>>::new(base, modulus)
+            .unwrap()
+            .sliding_hash_owned(text, window_size)
+            .collect();
 
     assert_eq!(rolling_results.len(), expected.len());
     for ((rolling_hash, rolling_start), (non_roll_hash, non_roll_start)) in
@@ -233,7 +241,6 @@ fn test_optimal_substring() {
 }
 
 use rolling_hash_rs::optimal_substring;
-use rolling_hash_rs::rolling_hash::RollingHash;
 
 #[test]
 fn test_most_common_substring() {
@@ -244,17 +251,8 @@ fn test_most_common_substring() {
         .map(|a| TD::try_from(a).ok().unwrap())
         .collect();
     let len: usize = 50;
-    let rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, RollingHash<TD, TH>>(
-        &resume,
-        &|_, _, _| true,
-        true,
-        len,
-        DEFAULT_BASE.into(),
-        DEFAULT_MOD_U64.into(),
-        true,
-    );
-    let non_rolling =
-        optimal_substring::most_common_of_len::<TD, usize, usize, TH, NonRollingHash<TD, TH>>(
+    let rolling =
+        optimal_substring::most_common_of_len::<TD, usize, usize, TH, WrappedRollingHash<TH>>(
             &resume,
             &|_, _, _| true,
             true,
@@ -263,6 +261,15 @@ fn test_most_common_substring() {
             DEFAULT_MOD_U64.into(),
             true,
         );
+    let non_rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, InterfaceHasher>(
+        &resume,
+        &|_, _, _| true,
+        true,
+        len,
+        DEFAULT_BASE.into(),
+        DEFAULT_MOD_U64.into(),
+        true,
+    );
     assert_eq!(rolling, non_rolling);
 
     match rolling {

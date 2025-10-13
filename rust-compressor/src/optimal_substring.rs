@@ -1,24 +1,3 @@
-#![allow(dead_code)] // TODO: fill in
-
-// def max_score(
-//     s: str, score_fn: Callable, allow_overlaps: bool = True, max_len: int = -1
-// ) -> str:
-//     """
-//     Given a string `s` and a scoring function which takes in a substring and the
-//     number of times it occurs, return a substring which achieves the maximum
-//     score among all substrings.
-
-//     Args:
-//         s (str): Input string
-//         score_fn (Callable): Function with signature (substring: str, count: int) -> int,
-//             where count is the number of times the substring appears in `s`.
-//         allow_overlaps (bool, optional): Whether to allow overlaps when counting substring.
-//             Defaults to True.
-//         max_len (int, optional): Maximum length of substrings to consider. Defaults to -1, which indicates 'no maximum length'.
-//     """
-//     print("¯\_(ツ)_/¯")
-//     raise NotImplementedError
-
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
@@ -26,11 +5,9 @@ use std::{
     ops::{Add, Mul, Sub},
 };
 
-use num_bigint::BigInt;
-
 use crate::{
-    non_rolling_hash::NonRollingHash,
-    rolling_hash::{HashType, RollingHash},
+    interface::WindowHasher,
+    rolling_hash::{HashType, WrappedRollingHash},
 };
 
 pub trait _TCount: Copy + PartialOrd + Add<Output = Self> + Debug {}
@@ -49,73 +26,6 @@ where
     }
     fn zero() -> Self {
         T::from(0)
-    }
-}
-
-pub trait Hasher<'a, TData, THash>: Iterator<Item = (THash, usize)> {
-    fn new(
-        s: &'a [TData],
-        window_len: usize,
-        base: THash,
-        modulus: THash,
-    ) -> Result<Self, &'static str>
-    where
-        Self: Sized;
-}
-
-pub trait HasherNew<'a, TData, THash>: Sized {
-    fn new(
-        s: &'a [TData],
-        window_len: usize,
-        base: THash,
-        modulus: THash,
-    ) -> Result<Self, &'static str>;
-}
-
-impl<'a, T, TData, THash> Hasher<'a, TData, THash> for T
-where
-    T: Iterator<Item = (THash, usize)> + HasherNew<'a, TData, THash>,
-{
-    fn new(
-        s: &'a [TData],
-        window_len: usize,
-        base: THash,
-        modulus: THash,
-    ) -> Result<Self, &'static str>
-    where
-        Self: Sized,
-    {
-        T::new(s, window_len, base, modulus)
-    }
-}
-
-impl<'a, TData, THash> HasherNew<'a, TData, THash> for RollingHash<'a, TData, THash>
-where
-    TData: Copy,
-    THash: HashType + From<TData>,
-{
-    fn new(
-        s: &'a [TData],
-        window_len: usize,
-        base: THash,
-        modulus: THash,
-    ) -> Result<Self, &'static str> {
-        RollingHash::new(s, window_len, base, modulus)
-    }
-}
-
-impl<'a, TData, THash> HasherNew<'a, TData, THash> for NonRollingHash<'a, TData, THash>
-where
-    TData: Copy + Into<BigInt>,
-    THash: HashType + From<TData> + Into<BigInt> + TryFrom<BigInt>,
-{
-    fn new(
-        s: &'a [TData],
-        window_len: usize,
-        base: THash,
-        modulus: THash,
-    ) -> Result<Self, &'static str> {
-        Ok(NonRollingHash::new(s, window_len, base, modulus))
     }
 }
 
@@ -142,7 +52,7 @@ pub fn most_common_of_len<
     TSize: TCount,
     TScore,
     THash: HashType + From<TData> + Hash + Eq + Debug,
-    RollHasher: Hasher<'a, TData, THash>,
+    RollHasher: WindowHasher<THash, TData>,
 >(
     s: &'a [TData],
     validator_fn: &dyn Fn(&[TData], usize, usize) -> bool, // whether string is valid
@@ -163,7 +73,9 @@ pub fn most_common_of_len<
     // maps hash -> count
     let mut hash_to_count: HashMap<THash, TSize> = HashMap::new();
 
-    for (hash, start) in RollHasher::new(s, len, base, modulus).unwrap() {
+    let hasher = RollHasher::new(base, modulus).unwrap();
+
+    for (hash, start) in hasher.sliding_hash_owned(s, len) {
         // map hash -> start, hash -> count
 
         let count: TSize;
@@ -234,7 +146,7 @@ fn max_score<
 ) -> Option<(TScore, &'a [TData], TSize)> {
     let mut max: Option<(TScore, &[TData], TSize)> = None;
     for len in min_len..=max_len {
-        let res = most_common_of_len::<_, TSize, TScore, _, RollingHash<'a, TData, THash>>(
+        let res = most_common_of_len::<_, TSize, TScore, _, WrappedRollingHash<THash>>(
             s,
             &validator_fn,
             allow_overlap,
@@ -351,6 +263,7 @@ pub fn best_substring<
 
 #[cfg(test)]
 mod tests {
+    // TODO: Test
     // check against known
     // check against brute force reference
 }
