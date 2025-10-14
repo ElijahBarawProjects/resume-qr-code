@@ -236,10 +236,58 @@ fn test_optimal_substring() {
         DEFAULT_BASE.into(),
         DEFAULT_MOD_U64.into(),
         true,
+        1,
     );
-    println!("{:?}", res);
+
+    let expected = dummy_best_substring();
+
+    assert_eq!(expected, res);
 }
 
+use optimal_substring::BestSubstringRes;
+fn dummy_best_substring() -> Option<BestSubstringRes<usize, usize>> {
+    Some(BestSubstringRes {
+        score: 47,
+        count: 6,
+        substring: "</b><ul><li>".to_string(),
+    })
+}
+
+#[test]
+fn test_optimal_substring_par() {
+    type TH = u128;
+    let par_res = best_substring::<TH, usize>(
+        RESUME,
+        '|',
+        false,
+        "~0",
+        true,
+        3,
+        50,
+        DEFAULT_BASE.into(),
+        DEFAULT_MOD_U64.into(),
+        true,
+        5,
+    )
+    .unwrap();
+    let seq_res = best_substring::<TH, usize>(
+        RESUME,
+        '|',
+        false,
+        "~0",
+        true,
+        3,
+        50,
+        DEFAULT_BASE.into(),
+        DEFAULT_MOD_U64.into(),
+        true,
+        5,
+    )
+    .unwrap();
+
+    assert_eq!(par_res, seq_res);
+    assert_eq!(seq_res, dummy_best_substring().unwrap());
+}
 use rolling_hash_rs::optimal_substring;
 
 #[test]
