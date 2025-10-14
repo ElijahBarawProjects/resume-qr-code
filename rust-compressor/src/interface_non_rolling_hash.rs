@@ -4,7 +4,7 @@ use tested_trait::test_impl;
 use num_bigint::BigInt;
 use num_iter::range;
 
-use crate::interface::{HasherErr, WindowHasher};
+use crate::interface::{HasherErr, ModWindowHasher, WindowHasher};
 
 #[derive(Clone)]
 pub struct InterfaceHasher {
@@ -29,6 +29,20 @@ impl<'a> InterfaceHasher {
     }
 }
 
+impl<THash, TData> WindowHasher<THash, TData> for InterfaceHasher
+where
+    TData: Copy + Into<BigInt>,
+    THash: TryFrom<BigInt> + Into<BigInt> + Copy,
+    {
+
+fn hash(&self, data: &[TData]) -> THash {
+        // we don't expect panics here as the built hash, while a BigInt, will
+        // fit in THash since it's smaller in magnitude than modulus
+        self.build_hash(data).try_into().ok().unwrap()
+    }
+    }
+
+
 #[cfg(test)]
 use crate::interface::tests::{
     WindowHasherDataSizeTests,
@@ -46,9 +60,9 @@ use crate::interface::tests::{
 };
 
 #[cfg_attr(test, test_impl(
-    InterfaceHasher: WindowHasher<u8, u8>, 
-    InterfaceHasher: WindowHasher<i8, i8>, 
-    InterfaceHasher: WindowHasher<u32, u8>,
+    InterfaceHasher: ModWindowHasher<u8, u8>, 
+    InterfaceHasher: ModWindowHasher<i8, i8>, 
+    InterfaceHasher: ModWindowHasher<u32, u8>,
     InterfaceHasher: WindowHasherDataSizeTests<u32, u32>,
     InterfaceHasher: WindowHasherDataTests<u32, u32>,
     InterfaceHasher: WindowHasherWindowSizeTests<u32, u32>,
@@ -65,7 +79,7 @@ use crate::interface::tests::{
     InterfaceHasher: WindowHasherHashPropertyTests<u32, u8>,
     InterfaceHasher: WindowHasherHashPropertyTests<i32, i16>,
 ))]
-impl<THash, TData> WindowHasher<THash, TData> for InterfaceHasher
+impl<THash, TData> ModWindowHasher<THash, TData> for InterfaceHasher
 where
     TData: Copy + Into<BigInt>,
     THash: TryFrom<BigInt> + Into<BigInt> + Copy,
@@ -82,11 +96,5 @@ where
         }
 
         Ok(InterfaceHasher { base, modulus })
-    }
-
-    fn hash(&self, data: &[TData]) -> THash {
-        // we don't expect panics here as the built hash, while a BigInt, will
-        // fit in THash since it's smaller in magnitude than modulus
-        self.build_hash(data).try_into().ok().unwrap()
     }
 }

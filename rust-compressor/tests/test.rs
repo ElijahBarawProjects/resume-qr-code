@@ -1,7 +1,7 @@
 use num_bigint::{BigInt, TryFromBigIntError};
 use rolling_hash_rs;
 
-use rolling_hash_rs::interface::WindowHasher;
+use rolling_hash_rs::interface::{ModWindowHasher, WindowHasher};
 use rolling_hash_rs::{
     optimal_substring::best_substring,
     rolling_hash::{HashType, DEFAULT_BASE, DEFAULT_MOD_U64},
@@ -17,20 +17,12 @@ where
 {
     // Get rolling hash results
 
-    let rolling_results: Vec<_> =
-        <WrappedRollingHash<TH> as rolling_hash_rs::interface::WindowHasher<TH, TD>>::new(
-            base, modulus,
-        )
-        .unwrap()
-        .sliding_hash_owned(text, window_size)
-        .collect();
+    let hasher = WrappedRollingHash::new(base, modulus).unwrap();
+    let rolling_results: Vec<_> = hasher.sliding_hash_owned(text, window_size).collect();
 
     // Calculate expected results manually
-    let expected: Vec<_> =
-        <InterfaceHasher as rolling_hash_rs::interface::WindowHasher<TH, TD>>::new(base, modulus)
-            .unwrap()
-            .sliding_hash_owned(text, window_size)
-            .collect();
+    let hasher = <InterfaceHasher as ModWindowHasher<TH, TD>>::new(base, modulus).unwrap();
+    let expected: Vec<_> = hasher.sliding_hash_owned(text, window_size).collect();
 
     assert_eq!(rolling_results.len(), expected.len());
     for ((rolling_hash, rolling_start), (non_roll_hash, non_roll_start)) in

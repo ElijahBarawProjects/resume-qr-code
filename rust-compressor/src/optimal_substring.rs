@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::{
-    interface::WindowHasher,
+    interface::ModWindowHasher,
     rolling_hash::{HashType, WrappedRollingHash},
 };
 
@@ -65,7 +65,7 @@ pub fn most_common_of_len<
     TSize: TCount,
     TScore,
     THash: HashType + From<TData> + Hash + Eq + Debug,
-    RollHasher: WindowHasher<THash, TData>,
+    RollHasher: ModWindowHasher<THash, TData>,
 >(
     s: &'a [TData],
     validator_fn: &dyn Fn(&[TData], usize, usize) -> bool, // whether string is valid

@@ -17,15 +17,7 @@ pub enum HasherErr {
     InvalidModulus(&'static str),
 }
 
-#[allow(dead_code)] // TODO: remove
-#[cfg_attr(test, tested_trait)]
 pub trait WindowHasher<THash, TData>: Sized + Clone {
-    /**
-     * Need to Implement
-     */
-
-    fn new(base: THash, modulus: THash) -> Result<Self, HasherErr>;
-
     fn hash<'data>(&self, data: &'data [TData]) -> THash;
 
     /**
@@ -51,8 +43,7 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
     where
         Self: 'data,
     {
-        let clone = self.clone();
-        clone.sliding_hash_owned(data, window_size)
+        self.clone().sliding_hash_owned(data, window_size)
     }
 
     /**
@@ -63,24 +54,23 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
     /// Shouldn't be overridden as it can serve as a reference
     fn slow_sliding_hash_owned<'data>(
         self,
-        data: &'data [TData],
-        window_size: usize,
+        mut data: &'data [TData],
+        mut window_size: usize,
     ) -> impl Iterator<Item = (THash, usize)> + 'data
     where
         Self: 'data,
     {
-        let num_iters = if window_size == 0 {
+        // hack so that window size of 0 => empty iterator instead of panic
+        if window_size == 0 {
             // this is a design choice, as it's unclear how many zero-length substrings there are
             // considered but not done: |data| + 1 elements equal to THash::zero()
-            0
-        } else {
-            (data.len() + 1).saturating_sub(window_size)
-        };
+            window_size = 1;
+            data = &data[0..0];
+        }
 
-        (0..num_iters).map(move |start| {
-            let window = &data[start..start + window_size];
-            (self.hash(window), start)
-        })
+        data.windows(window_size)
+            .enumerate()
+            .map(move |(start, window)| (self.hash(window), start))
     }
 
     fn slow_sliding_hash<'data>(
@@ -91,9 +81,21 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
     where
         Self: 'data,
     {
-        let clone = self.clone();
-        clone.slow_sliding_hash_owned(data, window_size)
+        self.clone().slow_sliding_hash_owned(data, window_size)
     }
+}
+
+#[cfg_attr(test, tested_trait)]
+pub trait ModWindowHasher<THash, TData>: WindowHasher<THash, TData> {
+    /**
+     * Need to Implement
+     */
+
+    fn new(base: THash, modulus: THash) -> Result<Self, HasherErr>;
+
+    /**
+     * Do Not Implement
+     */
 
     fn single_sliding_hash<'data>(
         base: THash,
@@ -117,7 +119,7 @@ pub trait WindowHasher<THash, TData>: Sized + Clone {
         TData: Bounded + TryFrom<u8>,
         THash: Div<Output = THash> + Bounded + TryFrom<u8> + PartialOrd + Copy,
     {
-        <Self as WindowHasher<THash, TData>>::test_type_boundaries_generic();
+        <Self as ModWindowHasher<THash, TData>>::test_type_boundaries_generic();
     }
 
     #[test]
@@ -229,7 +231,7 @@ pub mod tests {
 
     use crate::rolling_hash::HashType;
 
-    use super::WindowHasher;
+    use super::ModWindowHasher;
     use num_bigint::BigInt;
     use num_traits::{Bounded, Signed};
 
@@ -290,7 +292,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherDataSizeTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_data_size_empty()
@@ -336,7 +338,7 @@ pub mod tests {
             let base = unchecked_make_number(257u32);
             let modulus = unchecked_make_number(1000000007u32);
 
-            let hasher = <Self as WindowHasher<THash, TData>>::new(base, modulus).unwrap();
+            let hasher = <Self as ModWindowHasher<THash, TData>>::new(base, modulus).unwrap();
             let hash = hasher.hash(&data);
             assert_eq!(hash, unchecked_make_number(0));
 
@@ -413,7 +415,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherDataTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_data_with_zeros()
@@ -588,7 +590,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherWindowSizeTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_small_window_sizes()
@@ -808,7 +810,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherModulusTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_modulus_equals_base()
@@ -951,7 +953,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowhasherBoundedTDataTests<THash: TryFrom<u32>, TData: Bounded>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_bounded_min_value_data_signed() {
@@ -977,7 +979,7 @@ pub mod tests {
 
     pub trait WindowHasherBoundedTHashTests<THash: Bounded, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_large_modulus()
@@ -1046,7 +1048,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherSignedDataTests<THash, TData: Signed>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_mixed_positive_negative_zero()
@@ -1180,7 +1182,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherLargeUnsignedTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_large_data_small_modulus()
@@ -1368,7 +1370,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherLargeSignedTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_negative_modulus()
@@ -1400,7 +1402,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherErrorHandlingTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_new_error_zero_modulus()
@@ -1489,7 +1491,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherIteratorTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_iterator_count()
@@ -1644,7 +1646,7 @@ pub mod tests {
     #[tested_trait]
     pub trait WindowHasherHashPropertyTests<THash, TData>
     where
-        Self: WindowHasher<THash, TData>,
+        Self: ModWindowHasher<THash, TData>,
     {
         #[test]
         fn _test_hash_range_validation()
@@ -1733,27 +1735,33 @@ pub mod tests {
 
     // Automatically implement WindowHasherTests
 
-    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherDataSizeTests<THash, TData> for T {}
-    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherDataTests<THash, TData> for T {}
-    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherWindowSizeTests<THash, TData> for T {}
-    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherModulusTests<THash, TData> for T {}
-    impl<TH, TD, T: WindowHasher<TH, TD>> WindowHasherLargeUnsignedTests<TH, TD> for T {}
-    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherLargeSignedTests<THash, TData> for T {}
-    impl<TH: TryFrom<u32>, TD: Bounded, T: WindowHasher<TH, TD>>
+    impl<THash, TData, T: ModWindowHasher<THash, TData>> WindowHasherDataSizeTests<THash, TData> for T {}
+    impl<THash, TData, T: ModWindowHasher<THash, TData>> WindowHasherDataTests<THash, TData> for T {}
+    impl<THash, TData, T: ModWindowHasher<THash, TData>> WindowHasherWindowSizeTests<THash, TData>
+        for T
+    {
+    }
+    impl<THash, TData, T: ModWindowHasher<THash, TData>> WindowHasherModulusTests<THash, TData> for T {}
+    impl<TH, TD, T: ModWindowHasher<TH, TD>> WindowHasherLargeUnsignedTests<TH, TD> for T {}
+    impl<THash, TData, T: ModWindowHasher<THash, TData>> WindowHasherLargeSignedTests<THash, TData>
+        for T
+    {
+    }
+    impl<TH: TryFrom<u32>, TD: Bounded, T: ModWindowHasher<TH, TD>>
         WindowhasherBoundedTDataTests<TH, TD> for T
     {
     }
-    impl<TH: Bounded, TD, T: WindowHasher<TH, TD>> WindowHasherBoundedTHashTests<TH, TD> for T {}
-    impl<THash, TData: Signed, T: WindowHasher<THash, TData>>
+    impl<TH: Bounded, TD, T: ModWindowHasher<TH, TD>> WindowHasherBoundedTHashTests<TH, TD> for T {}
+    impl<THash, TData: Signed, T: ModWindowHasher<THash, TData>>
         WindowHasherSignedDataTests<THash, TData> for T
     {
     }
-    impl<THash: HashType + Signed, TData, T: WindowHasher<THash, TData>>
+    impl<THash: HashType + Signed, TData, T: ModWindowHasher<THash, TData>>
         WindowHasherErrorHandlingTests<THash, TData> for T
     {
     }
-    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherIteratorTests<THash, TData> for T {}
-    impl<THash, TData, T: WindowHasher<THash, TData>> WindowHasherHashPropertyTests<THash, TData>
+    impl<THash, TData, T: ModWindowHasher<THash, TData>> WindowHasherIteratorTests<THash, TData> for T {}
+    impl<THash, TData, T: ModWindowHasher<THash, TData>> WindowHasherHashPropertyTests<THash, TData>
         for T
     {
     }
