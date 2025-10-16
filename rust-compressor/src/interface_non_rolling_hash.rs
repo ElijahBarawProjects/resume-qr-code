@@ -33,14 +33,13 @@ impl<THash, TData> WindowHasher<THash, TData> for InterfaceHasher
 where
     TData: Copy + Into<BigInt>,
     THash: TryFrom<BigInt> + Into<BigInt> + Copy,
-    {
-
-fn hash(&self, data: &[TData]) -> THash {
+{
+    fn hash(&self, data: &[TData]) -> THash {
         // we don't expect panics here as the built hash, while a BigInt, will
         // fit in THash since it's smaller in magnitude than modulus
         self.build_hash(data).try_into().ok().unwrap()
     }
-    }
+}
 
 
 #[cfg(test)]

@@ -6,10 +6,7 @@ use std::{
     thread,
 };
 
-use crate::{
-    interface::ModWindowHasher,
-    rolling_hash::{HashType, WrappedRollingHash},
-};
+use crate::{interface::WindowHasher, rolling_hash::HashType};
 
 pub trait _TCount: Copy + PartialOrd + Add<Output = Self> + Debug {}
 impl<T> _TCount for T where T: Copy + PartialOrd + Add<Output = T> + Debug {}
@@ -30,6 +27,7 @@ where
     }
 }
 
+#[cfg(test)]
 /// Get a vector of (substring, count) for each substring in `data` of length `len`
 fn substr_count_vec<THash: Eq + Hash, TSize: Copy, TData: Copy + PartialOrd + Eq>(
     len: usize,
@@ -65,20 +63,19 @@ pub fn most_common_of_len<
     TSize: TCount,
     TScore,
     THash: HashType + From<TData> + Hash + Eq + Debug,
-    RollHasher: ModWindowHasher<THash, TData>,
+    THasher: WindowHasher<THash, TData>,
 >(
     s: &'a [TData],
     validator_fn: &dyn Fn(&[TData], usize, usize) -> bool, // whether string is valid
     allow_overlap: bool,
     len: usize,
-    base: THash,
-    modulus: THash,
+    window_hasher: &THasher,
     check: bool,
 ) -> Option<(usize, TSize)> {
     if !allow_overlap {
         unimplemented!("Non-overlapping substring is not supported");
     }
-    let mut max: Option<(THash, TSize)> = None;
+    let mut max: Option<(THash, TSize, usize)> = None;
 
     // maps hash -> start (length is fixed)
     let mut hash_to_start: HashMap<THash, usize> = HashMap::new();
@@ -86,9 +83,10 @@ pub fn most_common_of_len<
     // maps hash -> count
     let mut hash_to_count: HashMap<THash, TSize> = HashMap::new();
 
-    let hasher = RollHasher::new(base, modulus).unwrap();
-
-    for (hash, start) in hasher.sliding_hash_owned(s, len) {
+    for (hash, start) in window_hasher
+        .sliding_hash(s, len)
+        .filter(|(_hash, start)| validator_fn(s, *start, len))
+    {
         // map hash -> start, hash -> count
 
         let count: TSize;
@@ -110,32 +108,33 @@ pub fn most_common_of_len<
             }
         }
 
-        if !validator_fn(s, start, len) {
-            continue;
-        }
         match max {
-            Some((_hash, c)) => {
+            Some((_hash, c, curr_max_start)) => {
                 if c < count {
-                    max = Some((hash, count))
+                    max = Some((hash, count, *hash_to_start.get(&hash).unwrap()))
+                }
+                if c == count {
+                    // TODO DESIGN DECISION
+                    // break ties by preferring the earliest first occurence of the substring
+                    let new_start = *hash_to_start.get(&hash).unwrap();
+                    if new_start < curr_max_start {
+                        max = Some((hash, count, new_start))
+                    }
                 }
             }
-            None => max = Some((hash, count)),
+            None => max = Some((hash, count, *hash_to_start.get(&hash).unwrap())),
         }
     }
 
-    println!(
-        "{:?}",
-        substr_count_vec(len, s, &hash_to_start, &hash_to_count)
-    );
+    // #[cfg(test)]
+    // println!(
+    //     "{:?}",
+    //     substr_count_vec(len, s, &hash_to_start, &hash_to_count)
+    // );
 
     // return the most common valid substring
     match max {
-        Some((hash, count)) => {
-            let start = *hash_to_start
-                .get(&hash)
-                .expect("Substring must be encountered");
-            Some((start, count))
-        }
+        Some((_hash, count, start)) => Some((start, count)),
         None => None,
     }
 }
@@ -152,6 +151,7 @@ fn max_score<
     THash: HashType + From<TData> + Hash + Eq + Debug,
     TScorer: Fn(&[TData], usize, TSize) -> TScore, // slice, length, count => score
     TValidator: Fn(&[TData], usize, usize) -> bool, // slice, start, len
+    THasher: WindowHasher<THash, TData>,
 >(
     s: &'a [TData],
     score_fn: TScorer,
@@ -159,21 +159,19 @@ fn max_score<
     allow_overlap: bool,
     min_len: usize,
     max_len: usize,
-    base: THash,
-    modulus: THash,
+    hasher: &THasher,
     check: bool,
 ) -> Option<(TScore, &'a [TData], TSize)> {
     // TODO: potential improvement: have delimiter be an Option<...> param in this function, instead of using a validator fn
     // this allows us to maintain a count of the delimiter, knowing in O(1) if the number of occurences is zero or positive
     let mut max: Option<(TScore, &[TData], TSize)> = None;
     for len in min_len..=max_len {
-        let res = most_common_of_len::<_, TSize, TScore, _, WrappedRollingHash<THash>>(
+        let res = most_common_of_len::<TData, TSize, TScore, THash, THasher>(
             s,
             &validator_fn,
             allow_overlap,
             len,
-            base,
-            modulus,
+            &hasher,
             check,
         );
 
@@ -215,6 +213,7 @@ pub fn best_substring<
         + From<usize>
         + std::marker::Send
         + std::marker::Send,
+    THasher: WindowHasher<THash, char> + Sync,
 >(
     s: &'a str,
     delimiter: char,
@@ -223,8 +222,7 @@ pub fn best_substring<
     allow_overlap: bool,
     min_len: usize,
     max_len: usize,
-    base: THash,
-    modulus: THash,
+    hasher: &THasher,
     check: bool,
     n: usize,
 ) -> Option<BestSubstringRes<TSize, TSize>> {
@@ -275,8 +273,7 @@ pub fn best_substring<
             allow_overlap,
             min_len,
             max_len,
-            base,
-            modulus,
+            hasher,
             check,
         )
     } else {
@@ -287,8 +284,7 @@ pub fn best_substring<
             allow_overlap,
             min_len,
             max_len,
-            base,
-            modulus,
+            hasher,
             check,
             n,
         )
@@ -317,6 +313,7 @@ pub fn max_score_par<
     THash: HashType + From<TData> + Hash + Eq + Debug + Sync + Copy + Send,
     TScorer: Fn(&[TData], usize, TSize) -> TScore + Sync, // slice, length, count => score
     TValidator: Fn(&[TData], usize, usize) -> bool + Sync, // slice, start, len
+    THasher: WindowHasher<THash, TData> + Sync,
 >(
     s: &'a [TData],
     score_fn: TScorer,
@@ -324,8 +321,7 @@ pub fn max_score_par<
     allow_overlap: bool,
     min_len: usize,
     max_len: usize,
-    base: THash,
-    modulus: THash,
+    hasher: &THasher,
     check: bool,
     n: usize,
 ) -> Option<(TScore, &'a [TData], TSize)> {
@@ -361,8 +357,7 @@ pub fn max_score_par<
                     allow_overlap,
                     thread_min,
                     thread_max,
-                    base,
-                    modulus,
+                    hasher,
                     check,
                 )
             });

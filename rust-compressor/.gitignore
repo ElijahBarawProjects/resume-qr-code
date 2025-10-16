@@ -1,3 +1,4 @@
 target/
 debug/
 build.sh
+flamegraph.svg

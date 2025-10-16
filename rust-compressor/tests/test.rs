@@ -8,7 +8,7 @@ use rolling_hash_rs::{
 };
 
 use rolling_hash_rs::interface_non_rolling_hash::InterfaceHasher;
-use rolling_hash_rs::rolling_hash::WrappedRollingHash;
+use rolling_hash_rs::rolling_hash::HasherConfig;
 
 fn _test_rolling_hash_str_once<TH, TD>(text: &Vec<TD>, window_size: usize, base: TH, modulus: TH)
 where
@@ -17,7 +17,7 @@ where
 {
     // Get rolling hash results
 
-    let hasher = WrappedRollingHash::new(base, modulus).unwrap();
+    let hasher = HasherConfig::new(base, modulus).unwrap();
     let rolling_results: Vec<_> = hasher.sliding_hash_owned(text, window_size).collect();
 
     // Calculate expected results manually
@@ -214,22 +214,21 @@ fn test_rolling_hash_integers() {
     _test_rolling_hash_basic_str::<TH, TD>(resume, 3, 50, DEFAULT_BASE.into(), DEFAULT_MOD_U64);
 }
 
+fn new_default_rolling_hasher<TH: HashType + From<char> + From<u16> + From<u64>>(
+) -> HasherConfig<TH> {
+    <HasherConfig<TH> as ModWindowHasher<TH, char>>::new(
+        DEFAULT_BASE.into(),
+        DEFAULT_MOD_U64.into(),
+    )
+    .unwrap()
+}
+
 #[test]
 fn test_optimal_substring() {
     type TH = u128;
-    let res = best_substring::<TH, usize>(
-        RESUME,
-        '|',
-        false,
-        "~0",
-        true,
-        3,
-        50,
-        DEFAULT_BASE.into(),
-        DEFAULT_MOD_U64.into(),
-        true,
-        1,
-    );
+    let hasher = new_default_rolling_hasher();
+    let res =
+        best_substring::<TH, usize, _>(RESUME, '|', false, "~0", true, 3, 50, &hasher, true, 1);
 
     let expected = dummy_best_substring();
 
@@ -248,34 +247,13 @@ fn dummy_best_substring() -> Option<BestSubstringRes<usize, usize>> {
 #[test]
 fn test_optimal_substring_par() {
     type TH = u128;
-    let par_res = best_substring::<TH, usize>(
-        RESUME,
-        '|',
-        false,
-        "~0",
-        true,
-        3,
-        50,
-        DEFAULT_BASE.into(),
-        DEFAULT_MOD_U64.into(),
-        true,
-        5,
-    )
-    .unwrap();
-    let seq_res = best_substring::<TH, usize>(
-        RESUME,
-        '|',
-        false,
-        "~0",
-        true,
-        3,
-        50,
-        DEFAULT_BASE.into(),
-        DEFAULT_MOD_U64.into(),
-        true,
-        5,
-    )
-    .unwrap();
+    let hasher = new_default_rolling_hasher();
+    let par_res =
+        best_substring::<TH, usize, _>(RESUME, '|', false, "~0", true, 3, 50, &hasher, true, 5)
+            .unwrap();
+    let seq_res =
+        best_substring::<TH, usize, _>(RESUME, '|', false, "~0", true, 3, 50, &hasher, true, 5)
+            .unwrap();
 
     assert_eq!(par_res, seq_res);
     assert_eq!(seq_res, dummy_best_substring().unwrap());
@@ -286,28 +264,31 @@ use rolling_hash_rs::optimal_substring;
 fn test_most_common_substring() {
     type TH = u64;
     type TD = u32;
+    let hasher = new_default_rolling_hasher();
     let resume: Vec<_> = RESUME
         .chars()
         .map(|a| TD::try_from(a).ok().unwrap())
         .collect();
     let len: usize = 50;
-    let rolling =
-        optimal_substring::most_common_of_len::<TD, usize, usize, TH, WrappedRollingHash<TH>>(
-            &resume,
-            &|_, _, _| true,
-            true,
-            len,
-            DEFAULT_BASE.into(),
-            DEFAULT_MOD_U64.into(),
-            true,
-        );
+    let rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, HasherConfig<TH>>(
+        &resume,
+        &|_, _, _| true,
+        true,
+        len,
+        &hasher,
+        true,
+    );
+    let non_rolling_hasher = <InterfaceHasher as ModWindowHasher<TH, TD>>::new(
+        DEFAULT_BASE.into(),
+        DEFAULT_MOD_U64.into(),
+    )
+    .unwrap();
     let non_rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, InterfaceHasher>(
         &resume,
         &|_, _, _| true,
         true,
         len,
-        DEFAULT_BASE.into(),
-        DEFAULT_MOD_U64.into(),
+        &non_rolling_hasher,
         true,
     );
     assert_eq!(rolling, non_rolling);

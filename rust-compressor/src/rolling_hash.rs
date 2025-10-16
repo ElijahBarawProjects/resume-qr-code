@@ -1,16 +1,46 @@
 use num_traits::{ops::overflowing::OverflowingAdd, CheckedMul};
-use std::{
-    ops::{Add, BitAnd, Mul, Rem, Shr, Sub},
+use std::ops::{Add, BitAnd, Mul, Rem, Shr, Sub};
+
+use crate::{
+    interface::{ModWindowHasher, WindowHasher},
+    modular::Mod,
+    one_zero::OneZero,
 };
 
-use crate::{interface::{ModWindowHasher, WindowHasher}, modular::Mod, one_zero::OneZero};
-
 // Mersenne primes
-pub const DEFAULT_MOD_U64: u64 = 1 << 61 - 1;
+pub const DEFAULT_MOD_U64: u64 = (1 << 61) - 1;
 #[allow(unused)] // TODO REMOVE
-pub const DEFAULT_MOD_U32: u32 = 1 << 31 - 1;
+pub const DEFAULT_MOD_U32: u32 = (1 << 31) - 1;
 // prime & works well for ascii
 pub const DEFAULT_BASE: u16 = 257;
+
+#[derive(Clone, Copy)]
+pub struct HasherConfig<THash: HashType> {
+    base: THash,
+    modulus: Mod<THash>,
+}
+
+const MOD_INVALID_STR: &str = "Modulus is not valid";
+const BASE_INVALID_STR: &str = "Non-positive base";
+
+impl<THash: HashType> HasherConfig<THash> {
+    pub fn new(base: THash, modulus: THash) -> Result<Self, &'static str> {
+        if base <= THash::zero() {
+            return Err(BASE_INVALID_STR);
+        }
+
+        let _mod: Mod<THash>;
+        match Mod::new(modulus) {
+            Some(modulus) => _mod = modulus,
+            None => return Err(MOD_INVALID_STR),
+        };
+
+        Ok(Self {
+            base,
+            modulus: _mod,
+        })
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct _RollingHash<'a, TData, THash>
@@ -20,8 +50,7 @@ where
 {
     data: &'a [TData],
     window_size: usize,
-    base: THash,
-    modulus: Mod<THash>,
+    conf: HasherConfig<THash>,
     curr_start: usize,
     curr_hash: THash,
     highest_power: THash, // (base ^ (window_size - 1)) mod modulus
@@ -42,47 +71,47 @@ where
     TData: Copy,
     THash: HashType + From<TData>,
 {
+    pub fn new_with_conf(data: &'a [TData], window_size: usize, conf: HasherConfig<THash>) -> Self {
+        if window_size == 0 || window_size > data.len() {
+            return Self::Empty;
+        };
+
+        // non empty
+
+        let modulus = conf.modulus;
+
+        // base^(window_size-1) mod modulus
+        let highest_power = modulus.mod_pow(conf.base, (window_size - 1) as u64);
+
+        // Calculate initial hash for first window
+        let mut curr_hash = THash::zero();
+        for i in 0..window_size {
+            curr_hash =
+                modulus.mod_add(modulus.mod_mul(curr_hash, conf.base), THash::from(data[i]));
+        }
+
+        let state = _RollingHash {
+            data,
+            window_size,
+            conf,
+            curr_start: 0,
+            curr_hash,
+            highest_power,
+        };
+        Self::NonEmpty(state)
+    }
+
     pub fn new(
         data: &'a [TData],
         window_size: usize,
         base: THash,
         modulus: THash,
     ) -> Result<Self, &'static str> {
-        if base <= THash::zero() {
-            return Err("Non-positive base");
-        }
-        
-        let _mod: Mod<THash>;
-        match Mod::new(modulus) {
-            Some(modulus) => _mod = modulus,
-            None => return Err("Modulus is not valid"),
-        }
-
-        if window_size == 0 || window_size > data.len() {
-            return Ok(Self::Empty);
-        }
-
-        let modulus = _mod;
-
-        // base^(window_size-1) mod modulus
-        let highest_power = modulus.mod_pow(base, (window_size - 1) as u64);
-
-        // Calculate initial hash for first window
-        let mut curr_hash = THash::zero();
-        for i in 0..window_size {
-            curr_hash = modulus.mod_add(modulus.mod_mul(curr_hash, base), THash::from(data[i]));
-        }
-
-        let state = _RollingHash {
+        Ok(Self::new_with_conf(
             data,
             window_size,
-            base,
-            modulus,
-            curr_start: 0,
-            curr_hash,
-            highest_power,
-        };
-        Ok(Self::NonEmpty(state))
+            HasherConfig::new(base, modulus)?,
+        ))
     }
 }
 
@@ -121,15 +150,19 @@ where
         // we have a next iteration, compute it now
         let old_char = state.data[state.curr_start];
         // remove the previous character
-        state.curr_hash = state.modulus.mod_sub(
+        state.curr_hash = state.conf.modulus.mod_sub(
             state.curr_hash,
-            state.modulus.mod_mul(state.highest_power, old_char.into()),
+            state
+                .conf
+                .modulus
+                .mod_mul(state.highest_power, old_char.into()),
         );
         let new_char = state.data[state.curr_start + state.window_size].into();
         // add the new character
-        state.curr_hash = state
-            .modulus
-            .mod_add(state.modulus.mod_mul(state.curr_hash, state.base), new_char);
+        state.curr_hash = state.conf.modulus.mod_add(
+            state.conf.modulus.mod_mul(state.curr_hash, state.conf.base),
+            new_char,
+        );
 
         state.curr_start += 1;
         result
@@ -175,17 +208,11 @@ pub trait HashType: _HashType + OneZero {}
 // and implement _HashType (including all base integral types)
 impl<T> HashType for T where T: TryFrom<u8> + _HashType {}
 
-#[derive(Clone, Copy)]
-pub struct WrappedRollingHash<THash: HashType> {
-    base: THash,
-    modulus: THash,
-}
-
-impl<TData, THash> WindowHasher<THash, TData> for WrappedRollingHash<THash>
+impl<TData, THash> WindowHasher<THash, TData> for HasherConfig<THash>
 where
     TData: Copy,
     THash: From<TData> + HashType,
- {
+{
     fn hash<'data>(&self, data: &'data [TData]) -> THash {
         // we've already validated base, mod
 
@@ -193,14 +220,14 @@ where
             return THash::zero();
         }
 
-        let mut hasher = RollingHash::new(data, data.len(), self.base, self.modulus).unwrap();
+        let mut hasher = RollingHash::new_with_conf(data, data.len(), *self);
         let res = hasher.next().unwrap().0;
         assert!(hasher.next() == None);
         res
     }
 
-    fn sliding_hash_owned<'data>(
-        self,
+    fn sliding_hash<'data>(
+        &self,
         data: &'data [TData],
         window_size: usize,
     ) -> impl Iterator<Item = (THash, usize)> + 'data
@@ -208,66 +235,55 @@ where
         Self: 'data,
     {
         // we've already validated base, mod
-        RollingHash::new(data, window_size, self.base, self.modulus).unwrap()
+        RollingHash::new_with_conf(data, window_size, *self)
     }
 }
 
 #[cfg(test)]
 use crate::interface::tests::{
-    WindowHasherDataSizeTests,
-    WindowHasherDataTests,
-    WindowHasherWindowSizeTests,
-    WindowHasherModulusTests,
-    WindowHasherLargeUnsignedTests,
-    WindowHasherLargeSignedTests,
-    WindowhasherBoundedTDataTests,
-    WindowHasherBoundedTHashTests,
-    WindowHasherSignedDataTests,
-    WindowHasherErrorHandlingTests,
-    WindowHasherIteratorTests,
-    WindowHasherHashPropertyTests,
+    WindowHasherBoundedTHashTests, WindowHasherDataSizeTests, WindowHasherDataTests,
+    WindowHasherErrorHandlingTests, WindowHasherHashPropertyTests, WindowHasherIteratorTests,
+    WindowHasherLargeSignedTests, WindowHasherLargeUnsignedTests, WindowHasherModulusTests,
+    WindowHasherSignedDataTests, WindowHasherWindowSizeTests, WindowhasherBoundedTDataTests,
 };
 #[cfg(test)]
 use tested_trait::test_impl;
 #[cfg_attr(test, test_impl(
-    WrappedRollingHash<u8>: ModWindowHasher<u8, u8>, 
-    WrappedRollingHash<i8>: ModWindowHasher<i8, i8>, 
-    WrappedRollingHash<u32>: ModWindowHasher<u32, u8>,
-    WrappedRollingHash<u32>: WindowHasherDataSizeTests<u32, u32>,
-    WrappedRollingHash<u32>: WindowHasherDataTests<u32, u32>,
-    WrappedRollingHash<i32>: WindowHasherDataTests<i32, u8>,
-    WrappedRollingHash<u32>: WindowHasherWindowSizeTests<u32, u32>,
-    WrappedRollingHash<u32>: WindowHasherModulusTests<u32, u32>,
-    WrappedRollingHash<u32>: WindowHasherLargeUnsignedTests<u32, u32>,
-    WrappedRollingHash<i32>: WindowHasherLargeSignedTests<i32, i32>,
-    WrappedRollingHash<u32>: WindowhasherBoundedTDataTests<u32, u32>,
-    WrappedRollingHash<u32>: WindowHasherBoundedTHashTests<u32, u32>,
-    WrappedRollingHash<i32>: WindowHasherSignedDataTests<i32, i32>,
-    WrappedRollingHash<i32>: WindowHasherSignedDataTests<i32, i8>,
-    WrappedRollingHash<i32>: WindowHasherErrorHandlingTests<i32, i8>,
-    WrappedRollingHash<u32>: WindowHasherIteratorTests<u32, u8>,
-    WrappedRollingHash<i32>: WindowHasherIteratorTests<i32, i8>,
-    WrappedRollingHash<u32>: WindowHasherHashPropertyTests<u32, u8>,
-    WrappedRollingHash<i32>: WindowHasherHashPropertyTests<i32, i16>,
+    HasherConfig<u8>: ModWindowHasher<u8, u8>,
+    HasherConfig<i8>: ModWindowHasher<i8, i8>,
+    HasherConfig<u32>: ModWindowHasher<u32, u8>,
+    HasherConfig<u32>: WindowHasherDataSizeTests<u32, u32>,
+    HasherConfig<u32>: WindowHasherDataTests<u32, u32>,
+    HasherConfig<i32>: WindowHasherDataTests<i32, u8>,
+    HasherConfig<u32>: WindowHasherWindowSizeTests<u32, u32>,
+    HasherConfig<u32>: WindowHasherModulusTests<u32, u32>,
+    HasherConfig<u32>: WindowHasherLargeUnsignedTests<u32, u32>,
+    HasherConfig<i32>: WindowHasherLargeSignedTests<i32, i32>,
+    HasherConfig<u32>: WindowhasherBoundedTDataTests<u32, u32>,
+    HasherConfig<u32>: WindowHasherBoundedTHashTests<u32, u32>,
+    HasherConfig<i32>: WindowHasherSignedDataTests<i32, i32>,
+    HasherConfig<i32>: WindowHasherSignedDataTests<i32, i8>,
+    HasherConfig<i32>: WindowHasherErrorHandlingTests<i32, i8>,
+    HasherConfig<u32>: WindowHasherIteratorTests<u32, u8>,
+    HasherConfig<i32>: WindowHasherIteratorTests<i32, i8>,
+    HasherConfig<u32>: WindowHasherHashPropertyTests<u32, u8>,
+    HasherConfig<i32>: WindowHasherHashPropertyTests<i32, i16>,
 ))]
-impl<TData, THash> ModWindowHasher<THash, TData> for WrappedRollingHash<THash>
+impl<TData, THash> ModWindowHasher<THash, TData> for HasherConfig<THash>
 where
     TData: Copy,
     THash: From<TData> + HashType,
 {
     fn new(base: THash, modulus: THash) -> Result<Self, crate::interface::HasherErr> {
-        let base_test: Result<RollingHash<'_, TData, THash>, &'static str> =
-            RollingHash::new(&[], 0, base, THash::one());
-        if let Err(e) = base_test {
-            return Err(crate::interface::HasherErr::InvalidBase(e));
+        match Self::new(base, modulus) {
+            Ok(res) => Ok(res),
+            Err(err) => match err {
+                MOD_INVALID_STR => {
+                    Err(crate::interface::HasherErr::InvalidModulus(MOD_INVALID_STR))
+                }
+                BASE_INVALID_STR => Err(crate::interface::HasherErr::InvalidBase(BASE_INVALID_STR)),
+                _ => unreachable!(),
+            },
         }
-
-        let modulus_test: Result<RollingHash<'_, TData, THash>, &'static str> =
-            RollingHash::new(&[], 0, THash::one(), modulus);
-        if let Err(e) = modulus_test {
-            return Err(crate::interface::HasherErr::InvalidModulus(e));
-        }
-
-        Ok(WrappedRollingHash { base, modulus })
     }
 }
