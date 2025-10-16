@@ -1,7 +1,40 @@
+use std::hash::{BuildHasher, Hasher};
+
 use crate::{
     optimal_substring::{best_substring, BestSubstringRes},
     rolling_hash::{HasherConfig, DEFAULT_BASE, DEFAULT_MOD_U64},
 };
+
+// Identity hasher for u128 (no-op hashing since rolling hash values are already well-distributed)
+#[derive(Default)]
+struct U128IdentityHasher {
+    hash: u128,
+}
+
+impl Hasher for U128IdentityHasher {
+    fn write(&mut self, _bytes: &[u8]) {
+        unimplemented!("U128IdentityHasher only supports write_u128")
+    }
+
+    fn write_u128(&mut self, i: u128) {
+        self.hash = i;
+    }
+
+    fn finish(&self) -> u64 {
+        self.hash as u64
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct BuildU128IdentityHasher;
+
+impl BuildHasher for BuildU128IdentityHasher {
+    type Hasher = U128IdentityHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        U128IdentityHasher::default()
+    }
+}
 
 const START: char = '"'; // inclusive
 const END: char = SPECIAL; // exclusive
@@ -10,7 +43,7 @@ const DISALLOWED: [char; 2] = ['`', '\\'];
 const WORDLIST_DELIM: char = '|';
 const MIN_LEN: usize = 3;
 const MAX_LEN: usize = 50;
-const NPROC: usize = 1;
+const NPROC: Option<usize> = Some(1);
 const ALLOW_OVERLAP: bool = true;
 const CHECK: bool = false;
 
@@ -23,11 +56,33 @@ pub struct Replacement {
     count: usize,
 }
 
-pub fn greedy(mut text: String) -> Result<(Vec<Replacement>, String), &'static str> {
+/// Replace all occurrences of `pattern` with `replacement` in a Vec<char>
+fn replace_in_chars(chars: &[char], pattern: &[char], replacement: &[char]) -> Vec<char> {
+    let mut result = Vec::with_capacity(chars.len());
+    let mut i = 0;
+
+    while i < chars.len() {
+        // Check if pattern matches at current position
+        if i + pattern.len() <= chars.len() && chars[i..i + pattern.len()] == pattern[..] {
+            // Match found, add replacement
+            result.extend_from_slice(replacement);
+            i += pattern.len();
+        } else {
+            // No match, add current char
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+pub fn greedy(text: String) -> Result<(Vec<Replacement>, String), &'static str> {
     let mut chosen: Vec<Replacement> = vec![];
     let key_symbols = START..END;
     let mut prev_was_disallowed = false;
     let hasher: HasherConfig<_> = HasherConfig::new(DEFAULT_BASE.into(), DEFAULT_MOD_U64.into())?;
+    let mut chars: Vec<_> = text.chars().collect();
 
     for symbol in key_symbols {
         let key = String::from_iter([SPECIAL, symbol]);
@@ -46,8 +101,8 @@ pub fn greedy(mut text: String) -> Result<(Vec<Replacement>, String), &'static s
         }
 
         type TH = u128;
-        let best = best_substring::<TH, usize, _>(
-            &text,
+        let best = best_substring::<TH, usize, _, BuildU128IdentityHasher>(
+            &chars,
             WORDLIST_DELIM,
             prev_was_disallowed,
             &key,
@@ -56,7 +111,7 @@ pub fn greedy(mut text: String) -> Result<(Vec<Replacement>, String), &'static s
             MAX_LEN,
             &hasher,
             CHECK,
-            NPROC,
+            NPROC.unwrap_or_else(num_cpus::get),
         );
 
         match best {
@@ -66,7 +121,8 @@ pub fn greedy(mut text: String) -> Result<(Vec<Replacement>, String), &'static s
                 substring,
             }) => {
                 if score > 0 && count > 1 {
-                    text = text.replace(&substring, &key);
+                    let pat: Vec<_> = substring.chars().collect();
+                    chars = replace_in_chars(&chars, &pat, &[SPECIAL, symbol]);
 
                     chosen.push(Replacement {
                         substring: Some(substring),
@@ -86,7 +142,7 @@ pub fn greedy(mut text: String) -> Result<(Vec<Replacement>, String), &'static s
         prev_was_disallowed = false;
     }
 
-    Ok((chosen, text))
+    Ok((chosen, String::from_iter(chars)))
 }
 
 #[cfg(test)]
@@ -113,17 +169,10 @@ mod test {
 
     #[test]
     fn test_compress_decompress() {
-        println!("{}", RESUME_NO_DOCTYPE);
         let res = greedy(RESUME_NO_DOCTYPE.to_string()).unwrap();
         let (choices, compressed) = res;
-        println!("{:#?}", choices);
-        println!("{}", compressed);
-        println!("Compressed has length: {}", compressed.len());
-        println!("Compressed ref has length: {}", REF_COMPRESSED.len());
-        println!(
-            "compressed.len() - REF_COMPRESSED.len(): {}",
-            compressed.len() - REF_COMPRESSED.len()
-        );
+        assert_eq!(compressed, REF_COMPRESSED);
+
         let _choices = choices.clone();
         assert_eq!(
             RESUME_NO_DOCTYPE.to_string(),
@@ -132,11 +181,14 @@ mod test {
 
         let choices = _choices;
         let expected_choices = get_expected();
-        // assert_eq!(expected_choices.len(), choices.len(), "expected length {}, got length {}", expected_choices.len(), choices.len());
+
+        let comp_len = choices.len();
+        let expected_len = expected_choices.len();
 
         for (expected_choice, choice) in expected_choices.into_iter().zip(choices) {
             assert_eq!(expected_choice, choice)
         }
+        assert_eq!(expected_len, comp_len);
     }
 
     fn get_expected() -> Vec<Replacement> {

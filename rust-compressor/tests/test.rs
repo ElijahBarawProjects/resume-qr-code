@@ -1,3 +1,5 @@
+use std::hash::RandomState;
+
 use num_bigint::{BigInt, TryFromBigIntError};
 use rolling_hash_rs;
 
@@ -228,7 +230,7 @@ fn test_optimal_substring() {
     type TH = u128;
     let hasher = new_default_rolling_hasher();
     let res =
-        best_substring::<TH, usize, _>(RESUME, '|', false, "~0", true, 3, 50, &hasher, true, 1);
+        best_substring::<TH, usize, _, RandomState>(&RESUME.chars().collect(), '|', false, "~0", true, 3, 50, &hasher, true, 1);
 
     let expected = dummy_best_substring();
 
@@ -249,10 +251,10 @@ fn test_optimal_substring_par() {
     type TH = u128;
     let hasher = new_default_rolling_hasher();
     let par_res =
-        best_substring::<TH, usize, _>(RESUME, '|', false, "~0", true, 3, 50, &hasher, true, 5)
+        best_substring::<TH, usize, _, RandomState>(&RESUME.chars().collect(), '|', false, "~0", true, 3, 50, &hasher, true, 5)
             .unwrap();
     let seq_res =
-        best_substring::<TH, usize, _>(RESUME, '|', false, "~0", true, 3, 50, &hasher, true, 5)
+        best_substring::<TH, usize, _, RandomState>(&RESUME.chars().collect(), '|', false, "~0", true, 3, 50, &hasher, true, 5)
             .unwrap();
 
     assert_eq!(par_res, seq_res);
@@ -270,7 +272,7 @@ fn test_most_common_substring() {
         .map(|a| TD::try_from(a).ok().unwrap())
         .collect();
     let len: usize = 50;
-    let rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, HasherConfig<TH>>(
+    let rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, HasherConfig<TH>, RandomState>(
         &resume,
         &|_, _, _| true,
         true,
@@ -283,7 +285,7 @@ fn test_most_common_substring() {
         DEFAULT_MOD_U64.into(),
     )
     .unwrap();
-    let non_rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, InterfaceHasher>(
+    let non_rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, InterfaceHasher, RandomState>(
         &resume,
         &|_, _, _| true,
         true,
