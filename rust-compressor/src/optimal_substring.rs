@@ -1,5 +1,5 @@
 use std::{
-    collections::hash_map::Entry,
+    collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     hash::{BuildHasher, Hash},
     ops::{Add, Mul, Sub},
@@ -26,25 +26,6 @@ where
         T::from(0)
     }
 }
-
-// #[cfg(test)]
-// /// Get a vector of (substring, count) for each substring in `data` of length `len`
-// fn substr_count_vec<THash: Eq + Hash, TSize: Copy, TData: Copy + PartialOrd + Eq>(
-//     len: usize,
-//     data: &[TData],
-//     hash_to_start: &HashMap<THash, usize>,
-//     hash_to_count: &HashMap<THash, TSize>,
-// ) -> Vec<(Vec<TData>, TSize)> {
-//     let mut res = Vec::new();
-//     for (hash, start) in hash_to_start.iter() {
-//         let end = start + len;
-//         let substr = data[*start..end].to_vec();
-//         let count = hash_to_count.get(hash).unwrap();
-
-//         res.push((substr, *count))
-//     }
-//     res
-// }
 
 /// Get the most common substring of length `len`
 ///
@@ -88,15 +69,9 @@ pub fn most_common_of_len<
         count: TSize,
         start: usize,
     }
-    // let num_substrings = s.len().saturating_sub(len).saturating_add(1);
-    // let expected_num_entries = num_substrings / 2;
-    // let mut hash_to_start_count =
-    //     std::collections::HashMap::<THash, Cell<TSize>, S>::with_capacity_and_hasher(
-    //         expected_num_entries,
-    //         S::default(),
-    //     );
 
-    let mut hash_to_start_count = std::collections::HashMap::<THash, Cell<TSize>, S>::default();
+    type THashMap<A, B, C> = HashMap<A, B, C>;
+    let mut hash_to_start_count = THashMap::<THash, Cell<TSize>, S>::with_hasher(S::default());
     for (hash, start) in window_hasher
         .sliding_hash(s, len)
         .filter(|(_hash, start)| validator_fn(s, *start, len))
@@ -105,6 +80,7 @@ pub fn most_common_of_len<
 
         let stored_start;
         let count: TSize;
+
         let count_entry = hash_to_start_count.entry(hash);
         match count_entry {
             Entry::Occupied(mut occupied_count) => {
@@ -138,7 +114,7 @@ pub fn most_common_of_len<
                 start: curr_max_start,
             }) => {
                 if (prev_max_count < count)
-                    // TODO DESIGN DECISION
+                    // Design Decision
                     // break ties by preferring the earliest first occurence of the substring
                     || ((prev_max_count == count) && (stored_start < curr_max_start))
                 {
@@ -199,10 +175,12 @@ fn max_score<
     max_len: usize,
     hasher: &THasher,
     check: bool,
-) -> Option<(TScore, &'a [TData], TSize)> {
+) -> (Option<(TScore, &'a [TData], TSize)>, Option<usize>) {
     // TODO: potential improvement: have delimiter be an Option<...> param in this function, instead of using a validator fn
     // this allows us to maintain a count of the delimiter, knowing in O(1) if the number of occurences is zero or positive
     let mut max: Option<(TScore, &[TData], TSize)> = None;
+    let mut longest_with_count_gt_1: Option<usize> = None;
+
     for len in min_len..=max_len {
         let res = most_common_of_len::<TData, TSize, TScore, THash, THasher, S>(
             s,
@@ -216,6 +194,11 @@ fn max_score<
         match (res, max) {
             (None, _) => continue,
             (Some((start, count)), _m) => {
+                if count > TSize::one() {
+                    // we evaluate lengths in order, so future iterations will only overwrite
+                    longest_with_count_gt_1 = Some(len)
+                }
+
                 let slice = s.get(start..start + len).expect("");
                 let new_score = score_fn(slice, len, count);
                 match max {
@@ -232,7 +215,7 @@ fn max_score<
         }
     }
 
-    max
+    (max, longest_with_count_gt_1)
 }
 
 #[derive(Debug, PartialEq)]
@@ -265,6 +248,44 @@ pub fn best_substring<
     check: bool,
     n: usize,
 ) -> Option<BestSubstringRes<TSize, TSize>> {
+    best_substring_and_longest_gt_one::<_, _, _, S>(
+        chars,
+        delimiter,
+        prev_was_disallowed,
+        key,
+        allow_overlap,
+        min_len,
+        max_len,
+        hasher,
+        check,
+        n,
+    )
+    .0
+}
+
+pub fn best_substring_and_longest_gt_one<
+    'a,
+    THash: HashType + From<char> + PartialOrd + Hash + Eq + Debug + std::marker::Sync + std::marker::Send,
+    TSize: TCount
+        + Mul<Output = TSize>
+        + Sub<Output = TSize>
+        + From<usize>
+        + std::marker::Send
+        + std::marker::Send,
+    THasher: WindowHasher<THash, char> + Sync,
+    S: BuildHasher + Default,
+>(
+    chars: &Vec<char>,
+    delimiter: char,
+    prev_was_disallowed: bool,
+    key: &'a str,
+    allow_overlap: bool,
+    min_len: usize,
+    max_len: usize,
+    hasher: &THasher,
+    check: bool,
+    n: usize,
+) -> (Option<BestSubstringRes<TSize, TSize>>, Option<usize>) {
     assert!(n > 0);
     let validator = {
         let could_not_contain_delim = !chars.contains(&delimiter);
@@ -302,7 +323,7 @@ pub fn best_substring<
         })
     };
 
-    let best = if n == 1 {
+    let (best, longest_gt_1) = if n == 1 {
         max_score::<_, _, _, _, _, _, _, S>(
             chars,
             get_savings,
@@ -326,14 +347,16 @@ pub fn best_substring<
             n,
         )
     };
-    match best {
+    let best = match best {
         None => None,
         Some((score, substr, count)) => Some(BestSubstringRes {
             score,
             count,
             substring: substr.iter().collect(),
         }),
-    }
+    };
+
+    (best, longest_gt_1)
 }
 
 /// Given a `score_fn`, return the substring of `s` which has the highest score
@@ -362,7 +385,7 @@ pub fn max_score_par<
     hasher: &THasher,
     check: bool,
     n: usize,
-) -> Option<(TScore, &'a [TData], TSize)> {
+) -> (Option<(TScore, &'a [TData], TSize)>, Option<usize>) {
     assert!(n > 0);
     let num_rounds = max_len - min_len + 1;
     let all_threads_get = num_rounds / n;
@@ -404,7 +427,9 @@ pub fn max_score_par<
 
         // collect, waiting on all
         let mut best: Option<(TScore, &'a [TData], TSize)> = None;
-        for res in handles.into_iter().map(|handle| handle.join().unwrap()) {
+        let mut longest_gt_one: Option<usize> = None;
+
+        for (res, cur_longest_gt_one) in handles.into_iter().map(|handle| handle.join().unwrap()) {
             match (res, best) {
                 (None, _) => (),
                 (Some(_), None) => best = res,
@@ -414,8 +439,15 @@ pub fn max_score_par<
                     }
                 }
             };
+
+            if let Some(len) = cur_longest_gt_one {
+                longest_gt_one = match longest_gt_one {
+                    Some(prev_len) => Some(prev_len.max(len)),
+                    None => cur_longest_gt_one,
+                }
+            }
         }
-        best
+        (best, longest_gt_one)
     })
 }
 

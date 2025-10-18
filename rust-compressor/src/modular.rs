@@ -4,6 +4,18 @@ use num_traits::{ops::overflowing::OverflowingAdd, CheckedMul};
 
 use crate::one_zero::OneZero;
 
+pub trait Modulus<T>
+where
+    Self: Sized,
+{
+    fn new(modulus: T) -> Option<Self>;
+    fn mod_of(&self, a: T) -> T;
+    fn mod_add(&self, a: T, b: T) -> T;
+    fn mod_sub(&self, a: T, b: T) -> T;
+    fn mod_mul(&self, a: T, b: T) -> T;
+    fn mod_pow(&self, base: T, exp: u64) -> T;
+}
+
 // wrapper class
 #[derive(Clone, Copy)]
 pub struct Mod<T> {
@@ -11,7 +23,7 @@ pub struct Mod<T> {
 }
 
 // wrapper trait bundles needed arithmetic traits
-pub trait _SupportsMod:
+pub trait _SupportsDefaultMod:
     PartialOrd
     + OverflowingAdd
     + Rem<Output = Self>
@@ -24,7 +36,7 @@ pub trait _SupportsMod:
 }
 
 // implement wrapper trait
-impl<T> _SupportsMod for T where
+impl<T> _SupportsDefaultMod for T where
     T: PartialOrd
         + OverflowingAdd
         + Rem<Output = T>
@@ -37,39 +49,12 @@ impl<T> _SupportsMod for T where
 }
 
 // full wrapper trait: we need one() and zero()
-pub trait SupportsMod: _SupportsMod + OneZero {}
+pub trait SupportsDefaultMod: _SupportsDefaultMod + OneZero {}
 
 // implement wrapper trait
-impl<T> SupportsMod for T where T: _SupportsMod + OneZero {}
+impl<T> SupportsDefaultMod for T where T: _SupportsDefaultMod + OneZero {}
 
-// implementation logic
-impl<T: SupportsMod> Mod<T> {
-    pub fn new(modulus: T) -> Option<Self> {
-        // require that modulus is > 0, and that 2 * modulus can be represented by the type
-        if modulus <= T::zero() {
-            return None;
-        }
-
-        let (_, overflowed) = modulus.overflowing_add(&modulus);
-        if overflowed {
-            return None;
-        }
-
-        Some(Mod::<T> { modulus })
-    }
-
-    pub fn mod_of(&self, a: T) -> T {
-        let mut modded = a % self.modulus; // -self.modulus < a < self.modulus
-        modded = modded + self.modulus; // 0 < a < 2 * self.modulus
-        modded % self.modulus // 0 < a < self.modulus
-    }
-
-    pub fn mod_add(&self, mut a: T, mut b: T) -> T {
-        a = a % self.modulus; // - self.modulus < a < self.modulus
-        b = b % self.modulus; // - self.modulus < b < self.modulus
-        self.mod_of(a + b) // 0 <= _ < self.modulus
-    }
-
+impl<T: SupportsDefaultMod> Mod<T> {
     fn _mod_sub_branching(&self, mut a: T, mut b: T) -> T {
         if a >= b {
             return a - b % self.modulus;
@@ -96,10 +81,6 @@ impl<T: SupportsMod> Mod<T> {
         tmp % self.modulus
     }
 
-    pub fn mod_sub(&self, a: T, b: T) -> T {
-        self._mod_sub_no_branch(a, b)
-    }
-
     fn _slow_mod_mul(&self, mut a: T, mut b: T) -> T {
         let mut result = T::zero();
         while b > T::zero() {
@@ -114,8 +95,41 @@ impl<T: SupportsMod> Mod<T> {
         }
         result
     }
+}
 
-    pub fn mod_mul(&self, mut a: T, mut b: T) -> T {
+// implementation logic
+impl<T: SupportsDefaultMod> Modulus<T> for Mod<T> {
+    fn new(modulus: T) -> Option<Self> {
+        // require that modulus is > 0, and that 2 * modulus can be represented by the type
+        if modulus <= T::zero() {
+            return None;
+        }
+
+        let (_, overflowed) = modulus.overflowing_add(&modulus);
+        if overflowed {
+            return None;
+        }
+
+        Some(Mod::<T> { modulus })
+    }
+
+    fn mod_of(&self, a: T) -> T {
+        let mut modded = a % self.modulus; // -self.modulus < a < self.modulus
+        modded = modded + self.modulus; // 0 < a < 2 * self.modulus
+        modded % self.modulus // 0 < a < self.modulus
+    }
+
+    fn mod_add(&self, mut a: T, mut b: T) -> T {
+        a = a % self.modulus; // - self.modulus < a < self.modulus
+        b = b % self.modulus; // - self.modulus < b < self.modulus
+        self.mod_of(a + b) // 0 <= _ < self.modulus
+    }
+
+    fn mod_sub(&self, a: T, b: T) -> T {
+        self._mod_sub_no_branch(a, b)
+    }
+
+    fn mod_mul(&self, mut a: T, mut b: T) -> T {
         a = self.mod_of(a); // 0 <= a < self.modulus
         b = self.mod_of(b); // 0 <= b < self.modulus
         match a.checked_mul(&b) {
@@ -124,7 +138,7 @@ impl<T: SupportsMod> Mod<T> {
         }
     }
 
-    pub fn mod_pow(&self, mut base: T, mut exp: u64) -> T {
+    fn mod_pow(&self, mut base: T, mut exp: u64) -> T {
         let mut result = T::one();
         base = base % self.modulus;
 
@@ -146,54 +160,54 @@ mod tests {
 
     use num_traits::Bounded;
 
-    use crate::modular::SupportsMod;
+    use super::*;
 
-    use super::Mod;
+    type TMod<T> = Mod<T>;
 
     #[test]
     fn test_new_valid_modulus() {
         // test valid moduli for different types
-        assert!(Mod::new(7i32).is_some());
-        assert!(Mod::new(13u32).is_some());
-        assert!(Mod::new(1000000007i64).is_some());
-        assert!(Mod::new(998244353u64).is_some());
+        assert!(TMod::new(7i32).is_some());
+        assert!(TMod::new(13u32).is_some());
+        assert!(TMod::new(1000000007i64).is_some());
+        assert!(TMod::new(998244353u64).is_some());
 
         // test edge case: modulus = 1
-        assert!(Mod::new(1i32).is_some());
-        assert!(Mod::new(1u64).is_some());
+        assert!(TMod::new(1i32).is_some());
+        assert!(TMod::new(1u64).is_some());
     }
 
     #[test]
     fn test_new_invalid_modulus() {
         // test zero modulus
-        assert!(Mod::new(0i32).is_none());
-        assert!(Mod::new(0u32).is_none());
-        assert!(Mod::new(0i64).is_none());
-        assert!(Mod::new(0u64).is_none());
+        assert!(TMod::new(0i32).is_none());
+        assert!(TMod::new(0u32).is_none());
+        assert!(TMod::new(0i64).is_none());
+        assert!(TMod::new(0u64).is_none());
 
         // test negative modulus for signed types
-        assert!(Mod::new(-1i32).is_none());
-        assert!(Mod::new(-100i64).is_none());
+        assert!(TMod::new(-1i32).is_none());
+        assert!(TMod::new(-100i64).is_none());
     }
 
     #[test]
     fn test_new_overflow_modulus() {
         // test moduli that would overflow when doubled
-        assert!(Mod::new(i32::MAX).is_none());
-        assert!(Mod::new(u32::MAX).is_none());
-        assert!(Mod::new(i64::MAX).is_none());
-        assert!(Mod::new(u64::MAX).is_none());
-        assert!(Mod::new(i32::MAX / 2 + 1).is_none());
-        assert!(Mod::new(u32::MAX / 2 + 1).is_none());
+        assert!(TMod::new(i32::MAX).is_none());
+        assert!(TMod::new(u32::MAX).is_none());
+        assert!(TMod::new(i64::MAX).is_none());
+        assert!(TMod::new(u64::MAX).is_none());
+        assert!(TMod::new(i32::MAX / 2 + 1).is_none());
+        assert!(TMod::new(u32::MAX / 2 + 1).is_none());
 
         // test maximum valid moduli
-        assert!(Mod::new(i32::MAX / 2).is_some());
-        assert!(Mod::new(u32::MAX / 2).is_some());
+        assert!(TMod::new(i32::MAX / 2).is_some());
+        assert!(TMod::new(u32::MAX / 2).is_some());
     }
 
-    fn test_mod_of_basic_generic<T: SupportsMod + From<i16> + Debug + Bounded>() {
+    fn test_mod_of_basic_generic<T: SupportsDefaultMod + From<i16> + Debug + Bounded>() {
         let modulus: T = 7.into();
-        let mod7 = Mod::new(modulus).unwrap();
+        let mod7 = TMod::new(modulus).unwrap();
         for i in 0i16..7 {
             assert_eq!(mod7.mod_of(i.into()), i.into());
         }
@@ -219,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_mod_would_overflow() {
-        let mod7 = Mod::new(7i32).unwrap();
+        let mod7 = TMod::new(7i32).unwrap();
         // would overflow
         let min = i32::min_value();
         let max = i32::max_value();
@@ -240,11 +254,11 @@ mod tests {
 
     #[test]
     fn test_mod_of_different_types() {
-        let mod_u32 = Mod::new(1000u32).unwrap();
+        let mod_u32 = TMod::new(1000u32).unwrap();
         assert_eq!(mod_u32.mod_of(1500), 500);
         assert_eq!(mod_u32.mod_of(2000), 0);
 
-        let mod_i64 = Mod::new(1000000007i64).unwrap();
+        let mod_i64 = TMod::new(1000000007i64).unwrap();
         assert_eq!(mod_i64.mod_of(1000000008), 1);
         assert_eq!(mod_i64.mod_of(2000000014), 0);
         assert_eq!(mod_i64.mod_of(-1), 1000000006);
@@ -252,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_mod_of_large_values() {
-        let mod_u64 = Mod::new(1000000007u64).unwrap();
+        let mod_u64 = TMod::new(1000000007u64).unwrap();
         let large_val = u64::MAX - 1000;
         let expected = large_val % 1000000007;
         assert_eq!(mod_u64.mod_of(large_val), expected);
@@ -260,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_mod_add_basic() {
-        let mod7 = Mod::new(7i32).unwrap();
+        let mod7 = TMod::new(7i32).unwrap();
 
         assert_eq!(mod7.mod_add(3, 2), 5);
         assert_eq!(mod7.mod_add(4, 4), 1);
@@ -275,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_mod_add_overflow() {
-        let mod_large = Mod::new(1000000007u64).unwrap();
+        let mod_large = TMod::new(1000000007u64).unwrap();
         let a = u64::MAX / 2;
         let b = u64::MAX / 2;
         let result = mod_large.mod_add(a, b);
@@ -285,26 +299,26 @@ mod tests {
 
     #[test]
     fn test_mod_add_different_types() {
-        let mod_u32 = Mod::new(13u32).unwrap();
+        let mod_u32 = TMod::new(13u32).unwrap();
         assert_eq!(mod_u32.mod_add(10, 5), 2);
         assert_eq!(mod_u32.mod_add(12, 1), 0);
 
-        let mod_i128 = Mod::new(97i128).unwrap();
+        let mod_i128 = TMod::new(97i128).unwrap();
         assert_eq!(mod_i128.mod_add(50, 60), 13);
     }
 
     #[test]
     fn test_mod_sub_different_types() {
-        let mod_u64 = Mod::new(1000000007u64).unwrap();
+        let mod_u64 = TMod::new(1000000007u64).unwrap();
         assert_eq!(mod_u64.mod_sub(1000000006, 1000000008), 1000000005);
 
-        let mod_i64 = Mod::new(97i64).unwrap();
+        let mod_i64 = TMod::new(97i64).unwrap();
         assert_eq!(mod_i64.mod_sub(10, 50), 57);
     }
 
     #[test]
     fn test_mod_mul_basic() {
-        let mod7 = Mod::new(7i32).unwrap();
+        let mod7 = TMod::new(7i32).unwrap();
 
         assert_eq!(mod7.mod_mul(3, 4), 5);
         assert_eq!(mod7.mod_mul(6, 6), 1);
@@ -320,7 +334,7 @@ mod tests {
 
     #[test]
     fn test_mod_mul_large_values() {
-        let mod_prime = Mod::new(1000000007u64).unwrap();
+        let mod_prime = TMod::new(1000000007u64).unwrap();
         let a = 999999999u64;
         let b = 999999998u64;
         let result = mod_prime.mod_mul(a, b);
@@ -333,7 +347,7 @@ mod tests {
     #[test]
     fn test_mod_mul_overflow_fallback() {
         // Test with values that would overflow when multiplied
-        let mod_large = Mod::new(1000000007u64).unwrap();
+        let mod_large = TMod::new(1000000007u64).unwrap();
         let a = u64::MAX / 2;
         let b = u64::MAX / 3;
         let result = mod_large.mod_mul(a, b);
@@ -345,16 +359,16 @@ mod tests {
 
     #[test]
     fn test_mod_mul_different_types() {
-        let mod_u32 = Mod::new(97u32).unwrap();
+        let mod_u32 = TMod::new(97u32).unwrap();
         assert_eq!(mod_u32.mod_mul(50, 60), 90); // 3000 % 97 = 90
 
-        let mod_i128 = Mod::new(1009i128).unwrap();
+        let mod_i128 = TMod::new(1009i128).unwrap();
         assert_eq!(mod_i128.mod_mul(100, 200), 829); // 20000 % 1009 = 829
     }
 
     #[test]
     fn test_mod_pow_basic() {
-        let mod7 = Mod::new(7i32).unwrap();
+        let mod7 = TMod::new(7i32).unwrap();
 
         // Basic powers
         assert_eq!(mod7.mod_pow(2, 0), 1); // 2^0 = 1
@@ -371,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_mod_pow_large_exponents() {
-        let mod_prime = Mod::new(1000000007i64).unwrap();
+        let mod_prime = TMod::new(1000000007i64).unwrap();
 
         // Test large exponent
         let result = mod_prime.mod_pow(2, 1000000);
@@ -385,16 +399,16 @@ mod tests {
 
     #[test]
     fn test_mod_pow_different_types() {
-        let mod_u64 = Mod::new(97u64).unwrap();
+        let mod_u64 = TMod::new(97u64).unwrap();
         assert_eq!(mod_u64.mod_pow(10, 3), 30); // 1000 % 97 = 27
 
-        let mod_u32 = Mod::new(13u32).unwrap();
+        let mod_u32 = TMod::new(13u32).unwrap();
         assert_eq!(mod_u32.mod_pow(5, 4), 1); // 625 % 13 = 1
     }
 
     #[test]
     fn test_mod_pow_negative_base() {
-        let mod11 = Mod::new(11i32).unwrap();
+        let mod11 = TMod::new(11i32).unwrap();
 
         // Test negative base with even exponent
         assert_eq!(mod11.mod_pow(-3, 2), 9); // (-3)^2 = 9
@@ -405,7 +419,7 @@ mod tests {
 
     #[test]
     fn test_edge_case_modulus_1() {
-        let mod1 = Mod::new(1u32).unwrap();
+        let mod1 = TMod::new(1u32).unwrap();
 
         // Everything should be 0 mod 1
         assert_eq!(mod1.mod_of(100), 0);
@@ -417,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_edge_case_modulus_2() {
-        let mod2 = Mod::new(2i32).unwrap();
+        let mod2 = TMod::new(2i32).unwrap();
 
         // Test binary arithmetic
         assert_eq!(mod2.mod_of(5), 1); // 5 is odd
@@ -430,10 +444,10 @@ mod tests {
     #[test]
     fn test_consistency_across_types() {
         // Test that operations give consistent results across different integer types
-        let mod_i32 = Mod::new(97i32).unwrap();
-        let mod_u32 = Mod::new(97u32).unwrap();
-        let mod_i64 = Mod::new(97i64).unwrap();
-        let mod_u64 = Mod::new(97u64).unwrap();
+        let mod_i32 = TMod::new(97i32).unwrap();
+        let mod_u32 = TMod::new(97u32).unwrap();
+        let mod_i64 = TMod::new(97i64).unwrap();
+        let mod_u64 = TMod::new(97u64).unwrap();
 
         // Test same operations on different types
         assert_eq!(mod_i32.mod_add(50, 60), mod_u32.mod_add(50, 60) as i32);
@@ -444,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_mathematical_properties() {
-        let mod13 = Mod::new(13i32).unwrap();
+        let mod13 = TMod::new(13i32).unwrap();
 
         // Test commutativity of addition
         assert_eq!(mod13.mod_add(7, 9), mod13.mod_add(9, 7));
@@ -602,7 +616,7 @@ mod tests {
         let primes = [5, 7, 11, 13, 17, 19];
 
         for &p in &primes {
-            let mod_p = Mod::new(p as i64).unwrap();
+            let mod_p = TMod::new(p as i64).unwrap();
             for a in 1..std::cmp::min(p, 10) {
                 let result = mod_p.mod_pow(a as i64, (p - 1) as u64);
                 assert_eq!(
@@ -618,7 +632,7 @@ mod tests {
     fn test_euler_theorem_special_case() {
         // For prime modulus, φ(p) = p-1
         let p = 13i64;
-        let mod_p = Mod::new(p).unwrap();
+        let mod_p = TMod::new(p).unwrap();
 
         for a in 1..std::cmp::min(p, 6) {
             if gcd(a, p) == 1 {
@@ -682,7 +696,7 @@ mod tests {
         assert_eq!((e * d) % phi_n, 1);
 
         // Test encryption/decryption property
-        let mod_n = Mod::new(n).unwrap();
+        let mod_n = TMod::new(n).unwrap();
         let message = 42i64;
         let ciphertext = mod_n.mod_pow(message, e as u64);
         let decrypted = mod_n.mod_pow(ciphertext, d as u64);
@@ -691,7 +705,7 @@ mod tests {
 
     #[test]
     fn test_edge_cases_with_negative_numbers() {
-        let mod7 = Mod::new(7i32).unwrap();
+        let mod7 = TMod::new(7i32).unwrap();
 
         // Test with negative inputs
         assert_eq!(mod7.mod_add(-3, 5), 2);
@@ -701,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_large_number_operations() {
-        let large_mod = Mod::new(1000000007i64).unwrap();
+        let large_mod = TMod::new(1000000007i64).unwrap();
         let large_a = 123456789i64;
         let large_b = 987654321i64;
 
@@ -712,7 +726,7 @@ mod tests {
 
     #[test]
     fn test_zero_modulus_edge_cases() {
-        let mod1 = Mod::new(1i32).unwrap();
+        let mod1 = TMod::new(1i32).unwrap();
 
         // Everything should be 0 mod 1
         assert_eq!(mod1.mod_add(5, 3), 0);
@@ -756,8 +770,77 @@ mod tests {
         ];
 
         for case in &test_cases {
-            let mod_val = Mod::new(case.modulus).unwrap();
+            let mod_val = TMod::new(case.modulus).unwrap();
             assert_eq!(mod_val.mod_pow(case.base, case.exp), case.expected);
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CustomU64Mod {
+    modulus: u64,
+}
+
+impl CustomU64Mod {
+    #[inline(always)]
+    fn _mod_mul_no_branch(&self, a: u64, b: u64) -> u64 {
+        ((a as u128) * (b as u128) % (self.modulus as u128)) as u64
+    }
+}
+
+impl Modulus<u64> for CustomU64Mod {
+    fn new(modulus: u64) -> Option<Self> {
+        if modulus == 0 {
+            return None;
+        }
+
+        if modulus > (u64::MAX / 2) {
+            // without this constraint, mod_add could overflow
+            return None;
+        }
+
+        Some(CustomU64Mod { modulus })
+    }
+
+    #[inline(always)]
+    fn mod_of(&self, a: u64) -> u64 {
+        a % self.modulus
+    }
+
+    #[inline(always)]
+    fn mod_add(&self, a: u64, b: u64) -> u64 {
+        self.mod_of(self.mod_of(a) + self.mod_of(b))
+    }
+
+    #[inline(always)]
+    fn mod_sub(&self, mut a: u64, mut b: u64) -> u64 {
+        a = self.mod_of(a); // 0 <= a < self.modulus
+        a = a + self.modulus; // self.modulus <= a < 2 * self.modulus
+        b = self.mod_of(b); // 0 <= b < self.modulus => a >= b
+        self.mod_of(a - b) // 0 < tmp <= self.modulus
+    }
+
+    #[inline(always)]
+    fn mod_mul(&self, a: u64, b: u64) -> u64 {
+        match a.checked_mul(b) {
+            Some(res) => res % self.modulus,
+            None => self._mod_mul_no_branch(a, b),
+        }
+    }
+
+    #[inline(always)]
+    fn mod_pow(&self, mut base: u64, mut exp: u64) -> u64 {
+        let mut result = 1;
+        base = base % self.modulus;
+
+        while exp > 0 {
+            if exp % 2 == 1 {
+                result = self.mod_mul(result, base);
+            }
+            exp >>= 1;
+            base = self.mod_mul(base, base);
+        }
+
+        result
     }
 }

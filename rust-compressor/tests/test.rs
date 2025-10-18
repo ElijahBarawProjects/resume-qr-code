@@ -4,8 +4,9 @@ use num_bigint::{BigInt, TryFromBigIntError};
 use rolling_hash_rs;
 
 use rolling_hash_rs::interface::{ModWindowHasher, WindowHasher};
+use rolling_hash_rs::modular::Mod;
 use rolling_hash_rs::{
-    optimal_substring::best_substring,
+    optimal_substring::best_substring_and_longest_gt_one,
     rolling_hash::{HashType, DEFAULT_BASE, DEFAULT_MOD_U64},
 };
 
@@ -19,7 +20,7 @@ where
 {
     // Get rolling hash results
 
-    let hasher = HasherConfig::new(base, modulus).unwrap();
+    let hasher: HasherConfig<TH, Mod<TH>> = HasherConfig::new(base, modulus).unwrap();
     let rolling_results: Vec<_> = hasher.sliding_hash_owned(text, window_size).collect();
 
     // Calculate expected results manually
@@ -217,8 +218,8 @@ fn test_rolling_hash_integers() {
 }
 
 fn new_default_rolling_hasher<TH: HashType + From<char> + From<u16> + From<u64>>(
-) -> HasherConfig<TH> {
-    <HasherConfig<TH> as ModWindowHasher<TH, char>>::new(
+) -> HasherConfig<TH, Mod<TH>> {
+    <HasherConfig<TH, Mod<TH>> as ModWindowHasher<TH, char>>::new(
         DEFAULT_BASE.into(),
         DEFAULT_MOD_U64.into(),
     )
@@ -229,12 +230,23 @@ fn new_default_rolling_hasher<TH: HashType + From<char> + From<u16> + From<u64>>
 fn test_optimal_substring() {
     type TH = u128;
     let hasher = new_default_rolling_hasher();
-    let res =
-        best_substring::<TH, usize, _, RandomState>(&RESUME.chars().collect(), '|', false, "~0", true, 3, 50, &hasher, true, 1);
+    let res = best_substring_and_longest_gt_one::<TH, usize, _, RandomState>(
+        &RESUME.chars().collect(),
+        '|',
+        false,
+        "~0",
+        true,
+        3,
+        50,
+        &hasher,
+        true,
+        1,
+    );
 
-    let expected = dummy_best_substring();
-
-    assert_eq!(expected, res);
+    let expected_substring = dummy_best_substring();
+    let longest_repeated = ", Functional Programming, Systems,";
+    let longest_repeated_len = longest_repeated.len();
+    assert_eq!((expected_substring, Some(longest_repeated_len)), res);
 }
 
 use optimal_substring::BestSubstringRes;
@@ -250,12 +262,34 @@ fn dummy_best_substring() -> Option<BestSubstringRes<usize, usize>> {
 fn test_optimal_substring_par() {
     type TH = u128;
     let hasher = new_default_rolling_hasher();
-    let par_res =
-        best_substring::<TH, usize, _, RandomState>(&RESUME.chars().collect(), '|', false, "~0", true, 3, 50, &hasher, true, 5)
-            .unwrap();
-    let seq_res =
-        best_substring::<TH, usize, _, RandomState>(&RESUME.chars().collect(), '|', false, "~0", true, 3, 50, &hasher, true, 5)
-            .unwrap();
+    let par_res = best_substring_and_longest_gt_one::<TH, usize, _, RandomState>(
+        &RESUME.chars().collect(),
+        '|',
+        false,
+        "~0",
+        true,
+        3,
+        50,
+        &hasher,
+        true,
+        5,
+    );
+
+    let par_res = par_res.0.unwrap();
+    let seq_res = best_substring_and_longest_gt_one::<TH, usize, _, RandomState>(
+        &RESUME.chars().collect(),
+        '|',
+        false,
+        "~0",
+        true,
+        3,
+        50,
+        &hasher,
+        true,
+        5,
+    );
+
+    let seq_res = seq_res.0.unwrap();
 
     assert_eq!(par_res, seq_res);
     assert_eq!(seq_res, dummy_best_substring().unwrap());
@@ -272,20 +306,27 @@ fn test_most_common_substring() {
         .map(|a| TD::try_from(a).ok().unwrap())
         .collect();
     let len: usize = 50;
-    let rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, HasherConfig<TH>, RandomState>(
-        &resume,
-        &|_, _, _| true,
-        true,
-        len,
-        &hasher,
-        true,
-    );
+    let rolling = optimal_substring::most_common_of_len::<
+        TD,
+        usize,
+        usize,
+        TH,
+        HasherConfig<TH, Mod<TH>>,
+        RandomState,
+    >(&resume, &|_, _, _| true, true, len, &hasher, true);
     let non_rolling_hasher = <InterfaceHasher as ModWindowHasher<TH, TD>>::new(
         DEFAULT_BASE.into(),
         DEFAULT_MOD_U64.into(),
     )
     .unwrap();
-    let non_rolling = optimal_substring::most_common_of_len::<TD, usize, usize, TH, InterfaceHasher, RandomState>(
+    let non_rolling = optimal_substring::most_common_of_len::<
+        TD,
+        usize,
+        usize,
+        TH,
+        InterfaceHasher,
+        RandomState,
+    >(
         &resume,
         &|_, _, _| true,
         true,

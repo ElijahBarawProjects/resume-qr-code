@@ -3,34 +3,36 @@ use std::ops::{Add, BitAnd, Mul, Rem, Shr, Sub};
 
 use crate::{
     interface::{ModWindowHasher, WindowHasher},
-    modular::Mod,
+    modular::Modulus,
     one_zero::OneZero,
 };
 
+#[cfg(test)]
+use crate::modular::Mod;
+
 // Mersenne primes
 pub const DEFAULT_MOD_U64: u64 = (1 << 61) - 1;
-#[allow(unused)] // TODO REMOVE
 pub const DEFAULT_MOD_U32: u32 = (1 << 31) - 1;
 // prime & works well for ascii
 pub const DEFAULT_BASE: u16 = 257;
 
 #[derive(Clone, Copy)]
-pub struct HasherConfig<THash: HashType> {
+pub struct HasherConfig<THash: HashType, TMod: Modulus<THash>> {
     base: THash,
-    modulus: Mod<THash>,
+    modulus: TMod,
 }
 
 const MOD_INVALID_STR: &str = "Modulus is not valid";
 const BASE_INVALID_STR: &str = "Non-positive base";
 
-impl<THash: HashType> HasherConfig<THash> {
+impl<THash: HashType, TModulus: Modulus<THash>> HasherConfig<THash, TModulus> {
     pub fn new(base: THash, modulus: THash) -> Result<Self, &'static str> {
         if base <= THash::zero() {
             return Err(BASE_INVALID_STR);
         }
 
-        let _mod: Mod<THash>;
-        match Mod::new(modulus) {
+        let _mod: TModulus;
+        match TModulus::new(modulus) {
             Some(modulus) => _mod = modulus,
             None => return Err(MOD_INVALID_STR),
         };
@@ -43,35 +45,40 @@ impl<THash: HashType> HasherConfig<THash> {
 }
 
 #[derive(Clone, Copy)]
-pub struct _RollingHash<'a, TData, THash>
+pub struct _RollingHash<'a, TData, THash, TModulus: Modulus<THash>>
 where
     TData: Copy,
     THash: HashType,
 {
     data: &'a [TData],
     window_size: usize,
-    conf: HasherConfig<THash>,
+    conf: HasherConfig<THash, TModulus>,
     curr_start: usize,
     curr_hash: THash,
     highest_power: THash, // (base ^ (window_size - 1)) mod modulus
 }
 
 #[derive(Clone, Copy)]
-pub enum RollingHash<'a, TData, THash>
+pub enum RollingHash<'a, TData, THash, TModulus: Modulus<THash>>
 where
     TData: Copy,
     THash: HashType,
 {
     Empty,
-    NonEmpty(_RollingHash<'a, TData, THash>),
+    NonEmpty(_RollingHash<'a, TData, THash, TModulus>),
 }
 
-impl<'a, TData, THash> RollingHash<'a, TData, THash>
+impl<'a, TData, THash, TModulus: Modulus<THash> + Clone + Copy>
+    RollingHash<'a, TData, THash, TModulus>
 where
     TData: Copy,
     THash: HashType + From<TData>,
 {
-    pub fn new_with_conf(data: &'a [TData], window_size: usize, conf: HasherConfig<THash>) -> Self {
+    pub fn new_with_conf(
+        data: &'a [TData],
+        window_size: usize,
+        conf: HasherConfig<THash, TModulus>,
+    ) -> Self {
         if window_size == 0 || window_size > data.len() {
             return Self::Empty;
         };
@@ -115,7 +122,8 @@ where
     }
 }
 
-impl<'a, TData, THash> Iterator for RollingHash<'a, TData, THash>
+impl<'a, TData, THash, TModulus: Modulus<THash>> Iterator
+    for RollingHash<'a, TData, THash, TModulus>
 where
     TData: Copy,
     THash: From<TData> + HashType,
@@ -208,7 +216,8 @@ pub trait HashType: _HashType + OneZero {}
 // and implement _HashType (including all base integral types)
 impl<T> HashType for T where T: TryFrom<u8> + _HashType {}
 
-impl<TData, THash> WindowHasher<THash, TData> for HasherConfig<THash>
+impl<TData, THash, TModulus: Modulus<THash> + Clone + Copy> WindowHasher<THash, TData>
+    for HasherConfig<THash, TModulus>
 where
     TData: Copy,
     THash: From<TData> + HashType,
@@ -249,27 +258,28 @@ use crate::interface::tests::{
 #[cfg(test)]
 use tested_trait::test_impl;
 #[cfg_attr(test, test_impl(
-    HasherConfig<u8>: ModWindowHasher<u8, u8>,
-    HasherConfig<i8>: ModWindowHasher<i8, i8>,
-    HasherConfig<u32>: ModWindowHasher<u32, u8>,
-    HasherConfig<u32>: WindowHasherDataSizeTests<u32, u32>,
-    HasherConfig<u32>: WindowHasherDataTests<u32, u32>,
-    HasherConfig<i32>: WindowHasherDataTests<i32, u8>,
-    HasherConfig<u32>: WindowHasherWindowSizeTests<u32, u32>,
-    HasherConfig<u32>: WindowHasherModulusTests<u32, u32>,
-    HasherConfig<u32>: WindowHasherLargeUnsignedTests<u32, u32>,
-    HasherConfig<i32>: WindowHasherLargeSignedTests<i32, i32>,
-    HasherConfig<u32>: WindowhasherBoundedTDataTests<u32, u32>,
-    HasherConfig<u32>: WindowHasherBoundedTHashTests<u32, u32>,
-    HasherConfig<i32>: WindowHasherSignedDataTests<i32, i32>,
-    HasherConfig<i32>: WindowHasherSignedDataTests<i32, i8>,
-    HasherConfig<i32>: WindowHasherErrorHandlingTests<i32, i8>,
-    HasherConfig<u32>: WindowHasherIteratorTests<u32, u8>,
-    HasherConfig<i32>: WindowHasherIteratorTests<i32, i8>,
-    HasherConfig<u32>: WindowHasherHashPropertyTests<u32, u8>,
-    HasherConfig<i32>: WindowHasherHashPropertyTests<i32, i16>,
+    HasherConfig<u8, Mod<u8>>: ModWindowHasher<u8, u8>,
+    HasherConfig<i8, Mod<i8>>: ModWindowHasher<i8, i8>,
+    HasherConfig<u32, Mod<u32>>: ModWindowHasher<u32, u8>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherDataSizeTests<u32, u32>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherDataTests<u32, u32>,
+    HasherConfig<i32, Mod<i32>>: WindowHasherDataTests<i32, u8>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherWindowSizeTests<u32, u32>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherModulusTests<u32, u32>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherLargeUnsignedTests<u32, u32>,
+    HasherConfig<i32, Mod<i32>>: WindowHasherLargeSignedTests<i32, i32>,
+    HasherConfig<u32, Mod<u32>>: WindowhasherBoundedTDataTests<u32, u32>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherBoundedTHashTests<u32, u32>,
+    HasherConfig<i32, Mod<i32>>: WindowHasherSignedDataTests<i32, i32>,
+    HasherConfig<i32, Mod<i32>>: WindowHasherSignedDataTests<i32, i8>,
+    HasherConfig<i32, Mod<i32>>: WindowHasherErrorHandlingTests<i32, i8>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherIteratorTests<u32, u8>,
+    HasherConfig<i32, Mod<i32>>: WindowHasherIteratorTests<i32, i8>,
+    HasherConfig<u32, Mod<u32>>: WindowHasherHashPropertyTests<u32, u8>,
+    HasherConfig<i32, Mod<i32>>: WindowHasherHashPropertyTests<i32, i16>,
 ))]
-impl<TData, THash> ModWindowHasher<THash, TData> for HasherConfig<THash>
+impl<TData, THash, TModulus: Modulus<THash> + Clone + Copy> ModWindowHasher<THash, TData>
+    for HasherConfig<THash, TModulus>
 where
     TData: Copy,
     THash: From<TData> + HashType,

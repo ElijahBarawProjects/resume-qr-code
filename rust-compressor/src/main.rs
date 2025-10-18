@@ -6,7 +6,7 @@ use std::{
 
 use rolling_hash_rs::compressor;
 
-fn main() -> std::io::Result<()> {
+fn _main() -> std::io::Result<()> {
     // parse args
     let args: Vec<String> = env::args().collect();
     let in_name = &args[1];
@@ -22,4 +22,8 @@ fn main() -> std::io::Result<()> {
     let contents: Vec<u8> = compressed.bytes().into_iter().collect();
     out_file.write_all(&contents)?;
     Ok(())
+}
+
+fn main() -> std::io::Result<()> {
+    _main()
 }

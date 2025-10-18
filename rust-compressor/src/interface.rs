@@ -10,7 +10,6 @@ use std::ops::Div;
 #[cfg(test)]
 use crate::rolling_hash::HashType;
 
-#[allow(dead_code)] // TODO: remove
 #[derive(Debug)]
 pub enum HasherErr {
     InvalidBase(&'static str),
@@ -1120,7 +1119,6 @@ pub mod tests {
             TData: TryFrom<i8>,
         {
             Self::test_negative_values_comprehensive(unchecked_make_number(127))
-            // TODO: TEST WITH LARGER MODULUS
         }
 
         #[test]

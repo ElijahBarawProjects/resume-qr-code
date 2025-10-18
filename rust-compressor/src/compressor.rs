@@ -1,38 +1,40 @@
 use std::hash::{BuildHasher, Hasher};
 
 use crate::{
-    optimal_substring::{best_substring, BestSubstringRes},
+    interface::WindowHasher,
+    optimal_substring::{best_substring_and_longest_gt_one, BestSubstringRes},
     rolling_hash::{HasherConfig, DEFAULT_BASE, DEFAULT_MOD_U64},
 };
 
-// Identity hasher for u128 (no-op hashing since rolling hash values are already well-distributed)
+// Identity hasher for u64 (no-op hashing since rolling hash values are already well-distributed)
 #[derive(Default)]
-struct U128IdentityHasher {
-    hash: u128,
+struct U64IdentityHasher {
+    hash: u64,
 }
 
-impl Hasher for U128IdentityHasher {
+impl Hasher for U64IdentityHasher {
     fn write(&mut self, _bytes: &[u8]) {
-        unimplemented!("U128IdentityHasher only supports write_u128")
+        unimplemented!("U64IdentityHasher only supports write_u64")
     }
 
-    fn write_u128(&mut self, i: u128) {
-        self.hash = i;
+    fn write_u64(&mut self, i: u64) {
+        // self.hash = i;
+        self.hash = i ^ (i >> 32) ^ i.wrapping_mul(0x517cc1b727220a95);
     }
 
     fn finish(&self) -> u64 {
-        self.hash as u64
+        self.hash
     }
 }
 
 #[derive(Default, Clone, Copy)]
-struct BuildU128IdentityHasher;
+struct BuildU64IdentityHasher;
 
-impl BuildHasher for BuildU128IdentityHasher {
-    type Hasher = U128IdentityHasher;
+impl BuildHasher for BuildU64IdentityHasher {
+    type Hasher = U64IdentityHasher;
 
     fn build_hasher(&self) -> Self::Hasher {
-        U128IdentityHasher::default()
+        U64IdentityHasher::default()
     }
 }
 
@@ -43,7 +45,7 @@ const DISALLOWED: [char; 2] = ['`', '\\'];
 const WORDLIST_DELIM: char = '|';
 const MIN_LEN: usize = 3;
 const MAX_LEN: usize = 50;
-const NPROC: Option<usize> = Some(1);
+const NPROC: Option<usize> = None;
 const ALLOW_OVERLAP: bool = true;
 const CHECK: bool = false;
 
@@ -56,7 +58,7 @@ pub struct Replacement {
     count: usize,
 }
 
-/// Replace all occurrences of `pattern` with `replacement` in a Vec<char>
+#[allow(dead_code)]
 fn replace_in_chars(chars: &[char], pattern: &[char], replacement: &[char]) -> Vec<char> {
     let mut result = Vec::with_capacity(chars.len());
     let mut i = 0;
@@ -77,12 +79,61 @@ fn replace_in_chars(chars: &[char], pattern: &[char], replacement: &[char]) -> V
     result
 }
 
+/// Replace all occurrences of `pattern` with `replacement` in a Vec<char>
+/// Uses rolling hash for O(|chars| + |pattern|) complexity instead of O(|chars| * |pattern|)
+#[allow(dead_code)]
+fn replace_in_chars_hashing(
+    chars: &[char],
+    pattern: &[char],
+    replacement: &[char],
+    hasher: &HasherConfig<u128, crate::modular::Mod<u128>>,
+) -> Vec<char> {
+    if pattern.is_empty() {
+        return chars.to_vec();
+    }
+
+    let pattern_len = pattern.len();
+    let pattern_hash = hasher.hash(pattern);
+
+    let mut result = Vec::with_capacity(chars.len());
+    let mut i = 0; // Current position in input
+
+    for (hash, start) in hasher.sliding_hash(chars, pattern_len) {
+        if start < i {
+            continue;
+        }
+
+        while i < start {
+            result.push(chars[i]);
+            i += 1;
+        }
+
+        if hash == pattern_hash {
+            result.extend_from_slice(replacement);
+            i = start + pattern_len;
+        }
+    }
+
+    while i < chars.len() {
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    result
+}
+
 pub fn greedy(text: String) -> Result<(Vec<Replacement>, String), &'static str> {
     let mut chosen: Vec<Replacement> = vec![];
     let key_symbols = START..END;
     let mut prev_was_disallowed = false;
-    let hasher: HasherConfig<_> = HasherConfig::new(DEFAULT_BASE.into(), DEFAULT_MOD_U64.into())?;
+
+    type TModulus = crate::modular::CustomU64Mod;
+
+    let hasher: HasherConfig<_, TModulus> =
+        HasherConfig::new(DEFAULT_BASE.into(), DEFAULT_MOD_U64.into())?;
     let mut chars: Vec<_> = text.chars().collect();
+
+    let mut max_len = MAX_LEN;
 
     for symbol in key_symbols {
         let key = String::from_iter([SPECIAL, symbol]);
@@ -100,19 +151,40 @@ pub fn greedy(text: String) -> Result<(Vec<Replacement>, String), &'static str> 
             continue;
         }
 
-        type TH = u128;
-        let best = best_substring::<TH, usize, _, BuildU128IdentityHasher>(
+        type TH = u64;
+        let (best, longest_gt_one) = best_substring_and_longest_gt_one::<
+            TH,
+            usize,
+            HasherConfig<TH, TModulus>,
+            BuildU64IdentityHasher,
+        >(
             &chars,
             WORDLIST_DELIM,
             prev_was_disallowed,
             &key,
             ALLOW_OVERLAP,
             MIN_LEN,
-            MAX_LEN,
+            max_len,
             &hasher,
             CHECK,
             NPROC.unwrap_or_else(num_cpus::get),
         );
+
+        if let Some(upper_len) = longest_gt_one {
+            // WTS:
+            //      If we use this new upper bound + 2, then we capture the longest
+            //      substring after replacement
+            // Proof:
+            //      We are performing a substitution which will only reduce the length
+            //      of any substring which contains replaced substring. So, the only
+            //      way which a new, longer repeated substring could be created is
+            //      if it is from changes to the edges. This can only be one char
+            //      from each edge, as if it included both chars from any edge,
+            //      then the length would be sorter as a longer substring was
+            //      substituted for a shorter one. So, we have an increase in the
+            //      length of the longest repeated substring of at most two.
+            max_len = MAX_LEN.min(upper_len + 2);
+        }
 
         match best {
             Some(BestSubstringRes {
@@ -122,6 +194,7 @@ pub fn greedy(text: String) -> Result<(Vec<Replacement>, String), &'static str> 
             }) => {
                 if score > 0 && count > 1 {
                     let pat: Vec<_> = substring.chars().collect();
+                    // chars = replace_in_chars_hashing(&chars, &pat, &[SPECIAL, symbol], &hasher);
                     chars = replace_in_chars(&chars, &pat, &[SPECIAL, symbol]);
 
                     chosen.push(Replacement {
