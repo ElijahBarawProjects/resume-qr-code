@@ -156,11 +156,84 @@ impl<T: SupportsDefaultMod> Modulus<T> for Mod<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fmt::Debug, i32, u64};
-
-    use num_traits::Bounded;
-
     use super::*;
+    use num_traits::Bounded;
+    use std::{fmt::Debug, i32, u64};
+    use tested_trait::test_impl;
+
+    /**
+     * u64 specific tests, shared between Mod<u64> and CustomU64Mod
+     */
+
+    #[tested_trait::tested_trait]
+    trait ModTestsU64
+    where
+        Self: Modulus<u64>,
+    {
+        #[test]
+        fn test_new_valid_modulus() {
+            // test valid moduli for different types
+
+            assert!(Self::new(998244353u64).is_some());
+
+            // test edge case: modulus = 1
+
+            assert!(Self::new(1u64).is_some());
+        }
+        #[test]
+        fn test_new_invalid_modulus() {
+            // test zero modulus
+
+            assert!(Self::new(0u64).is_none());
+        }
+
+        #[test]
+
+        fn test_new_overflow_modulus() {
+            // test moduli that would overflow when doubled
+            assert!(Self::new(u64::MAX).is_none());
+        }
+
+        #[test]
+        fn test_mod_add_overflow() {
+            let mod_large = Self::new(1000000007u64).unwrap();
+            let a = u64::MAX / 2;
+            let b = u64::MAX / 2;
+            let result = mod_large.mod_add(a, b);
+            let expected = ((a % 1000000007) + (b % 1000000007)) % 1000000007;
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn test_mod_of_large_values() {
+            let mod_u64 = Self::new(1000000007u64).unwrap();
+            let large_val = u64::MAX - 1000;
+            let expected = large_val % 1000000007;
+            assert_eq!(mod_u64.mod_of(large_val), expected);
+        }
+
+        #[test]
+        fn test_mod_sub_different_types() {
+            let mod_u64 = Self::new(1000000007u64).unwrap();
+            assert_eq!(mod_u64.mod_sub(1000000006, 1000000008), 1000000005);
+        }
+
+        #[test]
+        fn test_mod_pow_different_types() {
+            let mod_u64 = Self::new(97u64).unwrap();
+            assert_eq!(mod_u64.mod_pow(10, 3), 30); // 1000 % 97 = 27
+        }
+    }
+
+    #[test_impl]
+    impl ModTestsU64 for CustomU64Mod {}
+
+    #[test_impl]
+    impl ModTestsU64 for Mod<u64> {}
+
+    /**
+     * Tests which require a generic constructor; tests Mod<T>
+     */
 
     type TMod<T> = Mod<T>;
 
@@ -170,11 +243,9 @@ mod tests {
         assert!(TMod::new(7i32).is_some());
         assert!(TMod::new(13u32).is_some());
         assert!(TMod::new(1000000007i64).is_some());
-        assert!(TMod::new(998244353u64).is_some());
 
         // test edge case: modulus = 1
         assert!(TMod::new(1i32).is_some());
-        assert!(TMod::new(1u64).is_some());
     }
 
     #[test]
@@ -183,7 +254,6 @@ mod tests {
         assert!(TMod::new(0i32).is_none());
         assert!(TMod::new(0u32).is_none());
         assert!(TMod::new(0i64).is_none());
-        assert!(TMod::new(0u64).is_none());
 
         // test negative modulus for signed types
         assert!(TMod::new(-1i32).is_none());
@@ -196,7 +266,6 @@ mod tests {
         assert!(TMod::new(i32::MAX).is_none());
         assert!(TMod::new(u32::MAX).is_none());
         assert!(TMod::new(i64::MAX).is_none());
-        assert!(TMod::new(u64::MAX).is_none());
         assert!(TMod::new(i32::MAX / 2 + 1).is_none());
         assert!(TMod::new(u32::MAX / 2 + 1).is_none());
 
@@ -265,14 +334,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mod_of_large_values() {
-        let mod_u64 = TMod::new(1000000007u64).unwrap();
-        let large_val = u64::MAX - 1000;
-        let expected = large_val % 1000000007;
-        assert_eq!(mod_u64.mod_of(large_val), expected);
-    }
-
-    #[test]
     fn test_mod_add_basic() {
         let mod7 = TMod::new(7i32).unwrap();
 
@@ -288,16 +349,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mod_add_overflow() {
-        let mod_large = TMod::new(1000000007u64).unwrap();
-        let a = u64::MAX / 2;
-        let b = u64::MAX / 2;
-        let result = mod_large.mod_add(a, b);
-        let expected = ((a % 1000000007) + (b % 1000000007)) % 1000000007;
-        assert_eq!(result, expected);
-    }
-
-    #[test]
     fn test_mod_add_different_types() {
         let mod_u32 = TMod::new(13u32).unwrap();
         assert_eq!(mod_u32.mod_add(10, 5), 2);
@@ -309,9 +360,6 @@ mod tests {
 
     #[test]
     fn test_mod_sub_different_types() {
-        let mod_u64 = TMod::new(1000000007u64).unwrap();
-        assert_eq!(mod_u64.mod_sub(1000000006, 1000000008), 1000000005);
-
         let mod_i64 = TMod::new(97i64).unwrap();
         assert_eq!(mod_i64.mod_sub(10, 50), 57);
     }
@@ -399,9 +447,6 @@ mod tests {
 
     #[test]
     fn test_mod_pow_different_types() {
-        let mod_u64 = TMod::new(97u64).unwrap();
-        assert_eq!(mod_u64.mod_pow(10, 3), 30); // 1000 % 97 = 27
-
         let mod_u32 = TMod::new(13u32).unwrap();
         assert_eq!(mod_u32.mod_pow(5, 4), 1); // 625 % 13 = 1
     }
