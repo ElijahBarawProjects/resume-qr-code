@@ -6,6 +6,8 @@
  * and applies RegPack compression
  *
  * Usage: node regpack-final.js <intermediates-file> <output-html> <output-qr>
+ * 
+ * WRITTEN BY CLAUDE
  */
 
 const fs = require('fs');
@@ -103,7 +105,7 @@ try {
             process.exit(1);
         } else {
             console.log('QR code saved to:', "'" + outputQr + "'");
-            console.log('\n✓ Two-stage compression complete!');
+            console.log('\nTwo-stage compression complete!');
         }
     });
 } catch (e) {
