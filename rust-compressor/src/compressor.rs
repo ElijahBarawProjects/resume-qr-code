@@ -3,6 +3,7 @@ use std::{
     hash::{BuildHasher, Hasher},
 };
 
+
 use crate::{
     interface::WindowHasher,
     optimal_substring::{best_substring_and_longest_gt_one, BestSubstringRes},
@@ -41,16 +42,191 @@ impl BuildHasher for BuildU64IdentityHasher {
     }
 }
 
-const START: char = '"'; // inclusive
-const END: char = SPECIAL; // exclusive
-const SPECIAL: char = '~';
-const DISALLOWED: [char; 2] = ['`', '\\'];
-const WORDLIST_DELIM: char = '|';
-const MIN_LEN: usize = 3;
-const MAX_LEN: usize = 50;
-const NPROC: Option<usize> = None;
-const ALLOW_OVERLAP: bool = true;
-const CHECK: bool = false;
+pub struct CompressorConfig {
+    pub start: char,
+    pub end: char,
+    pub special: char,
+    pub disallowed: Vec<char>,
+    pub wordlist_delim: char,
+    min_len: usize,
+    max_len: usize,
+    nproc: usize,
+    allow_overlap: bool,
+    check: bool,
+}
+
+impl Default for CompressorConfig {
+    fn default() -> Self {
+        const START: char = '"'; // inclusive
+        const END: char = SPECIAL; // exclusive
+        const SPECIAL: char = '~';
+        const DISALLOWED: [char; 2] = ['`', '\\'];
+        const WORDLIST_DELIM: char = '|';
+        const MIN_LEN: usize = 3;
+        const MAX_LEN: usize = 50;
+        const NPROC: Option<usize> = None;
+        const ALLOW_OVERLAP: bool = true;
+        const CHECK: bool = false;
+
+        Self::new(
+            START,
+            END,
+            SPECIAL,
+            DISALLOWED.into_iter().collect(),
+            WORDLIST_DELIM,
+            MIN_LEN,
+            MAX_LEN,
+            NPROC,
+            ALLOW_OVERLAP,
+            CHECK,
+        )
+        .expect("The specified defaults should produce a valid config")
+    }
+}
+
+impl CompressorConfig {
+    pub fn new(
+        start: char,
+        end: char,
+        special: char,
+        disallowed: Vec<char>,
+        wordlist_delim: char,
+        min_len: usize,
+        max_len: usize,
+        nproc: Option<usize>,
+        allow_overlap: bool,
+        check: bool,
+    ) -> Result<Self, &'static str> {
+        if start >= end {
+            return Err("No chars for substitution");
+        }
+
+        Ok(Self {
+            start,
+            end,
+            special,
+            disallowed,
+            wordlist_delim,
+            min_len,
+            max_len,
+            nproc: nproc.unwrap_or_else(num_cpus::get),
+            allow_overlap,
+            check,
+        })
+    }
+
+    pub fn greedy(&self, text: String) -> Result<(Vec<Replacement>, String), &'static str> {
+        let mut chosen: Vec<Replacement> = vec![];
+        let key_symbols = self.start..self.end;
+        let mut prev_was_disallowed = false;
+
+        type TModulus = crate::modular::CustomU64Mod;
+
+        let hasher: HasherConfig<_, TModulus> =
+            HasherConfig::new(DEFAULT_BASE.into(), DEFAULT_MOD_U64.into())?;
+        let mut chars: Vec<_> = text.chars().collect();
+
+        let mut max_len = self.max_len;
+
+        for symbol in key_symbols {
+            let key = String::from_iter([self.special, symbol]);
+
+            if self.disallowed.contains(&symbol) {
+                prev_was_disallowed = true;
+                chosen.push(Replacement {
+                    substring: None, // ie, replacement does nothing
+                    key,
+                    symbol,
+                    count: 0,
+                    // design decision: make this one's savings 0 (next will pay for this)
+                    savings: 0,
+                });
+                continue;
+            }
+
+            type TH = u64;
+            let (best, longest_gt_one) = best_substring_and_longest_gt_one::<
+                TH,
+                usize,
+                HasherConfig<TH, TModulus>,
+                BuildU64IdentityHasher,
+            >(
+                &chars,
+                self.wordlist_delim,
+                prev_was_disallowed,
+                &key,
+                self.allow_overlap,
+                self.min_len,
+                max_len,
+                &hasher,
+                self.check,
+                self.nproc,
+            );
+
+            if let Some(upper_len) = longest_gt_one {
+                // WTS:
+                //      If we use this new upper bound + 2, then we capture the longest
+                //      substring after replacement
+                // Proof:
+                //      We are performing a substitution which will only reduce the length
+                //      of any substring which contains replaced substring. So, the only
+                //      way which a new, longer repeated substring could be created is
+                //      if it is from changes to the edges. This can only be one char
+                //      from each edge, as if it included both chars from any edge,
+                //      then the length would be sorter as a longer substring was
+                //      substituted for a shorter one. So, we have an increase in the
+                //      length of the longest repeated substring of at most two.
+                max_len = self.max_len.min(upper_len + 2);
+            }
+
+            match best {
+                Some(BestSubstringRes {
+                    score,
+                    count,
+                    substring,
+                }) => {
+                    if score > 0 && count > 1 {
+                        let pat: Vec<_> = substring.chars().collect();
+                        // chars = replace_in_chars_hashing(&chars, &pat, &[SPECIAL, symbol], &hasher);
+                        chars = replace_in_chars(&chars, &pat, &[self.special, symbol]);
+
+                        chosen.push(Replacement {
+                            substring: Some(substring),
+                            key,
+                            symbol,
+                            savings: score,
+                            count: count,
+                        });
+                    } else {
+                        break;
+                    }
+                }
+
+                None => break,
+            };
+
+            prev_was_disallowed = false;
+        }
+
+        Ok((chosen, String::from_iter(chars)))
+    }
+
+    pub fn compress(&self, text: String) -> Result<String, &'static str> {
+        let (replacements, compressed) = self.greedy(text)?;
+
+        let num_replacements = replacements.len();
+        let last_symbol = (replacements.last().unwrap().symbol) as u64;
+
+        let replacement_list = &ReplacementList {
+            replacements,
+            delim: '|',
+        };
+
+        Ok(format!(
+        "<meta charset=\"utf-8\"><script>onload=()=>{{let w={replacement_list}.split(\"|\"),h=`{compressed}`;for(i=0;i<{num_replacements};)h=h.replaceAll(\"~\"+String.fromCharCode({last_symbol}-i),w[i++]);document.body.innerHTML=h}};</script>",
+    ))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Replacement {
@@ -125,102 +301,6 @@ fn replace_in_chars_hashing(
     result
 }
 
-pub fn greedy(text: String) -> Result<(Vec<Replacement>, String), &'static str> {
-    let mut chosen: Vec<Replacement> = vec![];
-    let key_symbols = START..END;
-    let mut prev_was_disallowed = false;
-
-    type TModulus = crate::modular::CustomU64Mod;
-
-    let hasher: HasherConfig<_, TModulus> =
-        HasherConfig::new(DEFAULT_BASE.into(), DEFAULT_MOD_U64.into())?;
-    let mut chars: Vec<_> = text.chars().collect();
-
-    let mut max_len = MAX_LEN;
-
-    for symbol in key_symbols {
-        let key = String::from_iter([SPECIAL, symbol]);
-
-        if DISALLOWED.contains(&symbol) {
-            prev_was_disallowed = true;
-            chosen.push(Replacement {
-                substring: None, // ie, replacement does nothing
-                key,
-                symbol,
-                count: 0,
-                // design decision: make this one's savings 0 (next will pay for this)
-                savings: 0,
-            });
-            continue;
-        }
-
-        type TH = u64;
-        let (best, longest_gt_one) = best_substring_and_longest_gt_one::<
-            TH,
-            usize,
-            HasherConfig<TH, TModulus>,
-            BuildU64IdentityHasher,
-        >(
-            &chars,
-            WORDLIST_DELIM,
-            prev_was_disallowed,
-            &key,
-            ALLOW_OVERLAP,
-            MIN_LEN,
-            max_len,
-            &hasher,
-            CHECK,
-            NPROC.unwrap_or_else(num_cpus::get),
-        );
-
-        if let Some(upper_len) = longest_gt_one {
-            // WTS:
-            //      If we use this new upper bound + 2, then we capture the longest
-            //      substring after replacement
-            // Proof:
-            //      We are performing a substitution which will only reduce the length
-            //      of any substring which contains replaced substring. So, the only
-            //      way which a new, longer repeated substring could be created is
-            //      if it is from changes to the edges. This can only be one char
-            //      from each edge, as if it included both chars from any edge,
-            //      then the length would be sorter as a longer substring was
-            //      substituted for a shorter one. So, we have an increase in the
-            //      length of the longest repeated substring of at most two.
-            max_len = MAX_LEN.min(upper_len + 2);
-        }
-
-        match best {
-            Some(BestSubstringRes {
-                score,
-                count,
-                substring,
-            }) => {
-                if score > 0 && count > 1 {
-                    let pat: Vec<_> = substring.chars().collect();
-                    // chars = replace_in_chars_hashing(&chars, &pat, &[SPECIAL, symbol], &hasher);
-                    chars = replace_in_chars(&chars, &pat, &[SPECIAL, symbol]);
-
-                    chosen.push(Replacement {
-                        substring: Some(substring),
-                        key,
-                        symbol,
-                        savings: score,
-                        count: count,
-                    });
-                } else {
-                    break;
-                }
-            }
-
-            None => break,
-        };
-
-        prev_was_disallowed = false;
-    }
-
-    Ok((chosen, String::from_iter(chars)))
-}
-
 #[cfg(test)]
 fn decompress(mut text: String, choices: Vec<Replacement>) -> String {
     for Replacement { substring, key, .. } in choices.iter().rev() {
@@ -256,27 +336,10 @@ impl std::fmt::Display for ReplacementList {
     }
 }
 
-pub fn compress(text: String) -> Result<String, &'static str> {
-    let (replacements, compressed) = greedy(text)?;
-
-    let num_replacements = replacements.len();
-    let last_symbol = (replacements.last().unwrap().symbol) as u64;
-
-    let replacement_list = &ReplacementList {
-        replacements,
-        delim: '|',
-    };
-
-    Ok(format!(
-        "<meta charset=\"utf-8\"><script>onload=()=>{{let w={replacement_list}.split(\"|\"),h=`{compressed}`;for(i=0;i<{num_replacements};)h=h.replaceAll(\"~\"+String.fromCharCode({last_symbol}-i),w[i++]);document.body.innerHTML=h}};</script>",
-    ))
-}
-
 #[cfg(test)]
 mod test {
-    use super::{compress, decompress, Replacement};
-
-    use super::greedy;
+    use super::CompressorConfig;
+    use super::{decompress, Replacement};
 
     const RESUME_NO_DOCTYPE: &'static str = "<center><p><b><a href=\"https://www.elijahbaraw.com/\" style=\"color:#00f\"><u>Elijah Baraw</u></a></b><br><a href=\"mailto:ebaraw@andrew.cmu.edu?subject=RE:%20Your%20Resume\" style=\"color:#00f\"><u>ebaraw@andrew.cmu.edu</u></a> (203) 731-9535 Pittsburgh, PA <a href=\"https://github.com/elijah-bae-raw\" style=\"color:#00f\"><u>github.com/elijah-bae-raw</u></a></center><hr><h1>Education</h1><p><b>Carnegie Mellon University, School of Computer Science</b> <b>Aug 2021 - May 2025</b><br><em>Bachelor of Science in Computer Science. Concentration in Computer Systems</em><br>GPA: 3.97. Relevant courses: Machine Learning, Cloud Computing, Distributed Systems, Data Structures and<br>Algorithms, Functional Programming, Systems, Parallel Algorithms, Linear Algebra, Differential Equations, IDL<h1>Technical Skills</h1><p><b>Languages:</b> C, Python, Go, SQL, Java, HCL<br><b>Technologies:</b> NumPy, PyTorch, Pandas, OpenCV, Linux, Sockets, Git, AWS, GCP, Azure, K8s, Docker<br><b>Topics:</b> Data Structures and Algorithms, Object Oriented Programing, Functional Programming, Systems,<br>Consensus Algorithms, Actor Model, Network Protocols, TCP, Cryptographic Algorithms, Machine Learning<h1>Experience</h1><p><b>Center for Atmospheric Particle Studies</b> <b>Pittsburgh, PA</b><br><b>Research Assistant</b> <b>May 2022 - Aug 2022</b><ul><li>Developed a low cost device for measuring PM2.5 air pollutants collected on a foam tape over several months<li>Implemented an image processing pipeline as a cheaper alternative to traditional particle detection machines<li>Integrated a system of Arduino and Python scripts to control stepper motors based on continuous CV input.</ul><h1>Projects</h1><p><b>Fontify (Solo Python Project)</b> <em>PIL, Image Processing, De-Noising, Computer Vision</em> <b>Jan 2022 - July 2022</b><ul><li>Created image processing software in Python to convert handwritten letters into a personalized bitmap font.<li>Utilized image processing, edge-detection, noise reduction algorithms to detect pencil writing on paper.</ul><p><b>Concurrent Proxy Server (C)</b> <em>Git, HTTP, Sockets</em> <b>July 2023</b><ul><li>Developed a proxy server in C using p_threads and fork to handle requests concurrently, anonymize traffic and cache responses. Utilized Unix sockets and a bounded cache following an LRU eviction policy.</ul><p><b>Distributed Backend (Golang)</b> <em>Replication, Actor Model, Mailbox/Message Passing</em> <b>Nov 2023</b><ul><li>Designed and executed a concurrent server to manage the state for a multiplayer game, accessible via API.<li>Handled client requests about and updates to the game state using RPCs and a message-passing model.<li>Implemented node launching and server groups, ensuring replication and enforcing consistency within groups.</ul><p><b>Poker-Bots Hackathon Dev Team</b> <em>GCP, K8s, GitHub Actions</em> <b>Mar 2024; Mar 2025</b><ul><li>Helped CMU Data Science Club run their first AI Poker-Bot competition, with $6,000 in prizes and 63 teams.<li>Used GitHub Actions to automatically build Docker images of user-submitted Python bots, allowing competitors to use custom dependencies and machine learning libraries of their choice, running containers on GCP.<li>Helped build the second iteration of the competition in 2025 using AWS ECS for bots, Lambda for matches</ul><p><b>x86 IA-32 Kernel from Scratch</b> <em>C, ASM, Simics</em> <b>Aug 2024 - Dec 2024</b><ul><li>Built a complete i386 kernel from scratch, solo, for CMU 15410, implementing preemptive multitasking<li>Engineered hardware interfaces, memory management, and I/O system for concurrent ELF binary execution</ul>";
     // reference generated by python script
@@ -284,7 +347,9 @@ mod test {
 
     #[test]
     fn test_greedy_decompress() {
-        let res = greedy(RESUME_NO_DOCTYPE.to_string()).unwrap();
+        let res = CompressorConfig::default()
+            .greedy(RESUME_NO_DOCTYPE.to_string())
+            .unwrap();
         let (choices, compressed) = res;
         assert_eq!(compressed, REF_COMPRESSED_BODY);
 
@@ -961,7 +1026,9 @@ mod test {
 
     #[test]
     fn test_compress() {
-        let computed = compress(RESUME_NO_DOCTYPE.to_string()).unwrap();
+        let computed = CompressorConfig::default()
+            .compress(RESUME_NO_DOCTYPE.to_string())
+            .unwrap();
         let expected = REF_COMPRESSED_HTML.to_string();
         assert_eq!(computed, expected)
     }
