@@ -1,6 +1,6 @@
 use std::{
     fmt::Write,
-    hash::{BuildHasher, Hasher},
+    hash::{BuildHasher, Hasher}
 };
 
 use crate::{
@@ -41,6 +41,10 @@ impl BuildHasher for BuildU64IdentityHasher {
     }
 }
 
+/**
+ * Config, which is used to compress a String
+ */
+
 pub struct CompressorConfig {
     pub start: char,
     pub end: char,
@@ -52,56 +56,6 @@ pub struct CompressorConfig {
     nproc: usize,
     allow_overlap: bool,
     check: bool,
-}
-
-impl Default for CompressorConfig {
-    fn default() -> Self {
-        const START: char = '"'; // inclusive
-        const END: char = SPECIAL; // exclusive
-        const SPECIAL: char = '~';
-        const DISALLOWED: [char; 2] = ['`', '\\'];
-        const WORDLIST_DELIM: char = '|';
-        const MIN_LEN: usize = 3;
-        const MAX_LEN: usize = 50;
-        const NPROC: Option<usize> = None;
-        const ALLOW_OVERLAP: bool = true;
-        const CHECK: bool = false;
-
-        Self::new(
-            START,
-            END,
-            SPECIAL,
-            DISALLOWED.into_iter().collect(),
-            WORDLIST_DELIM,
-            MIN_LEN,
-            MAX_LEN,
-            NPROC,
-            ALLOW_OVERLAP,
-            CHECK,
-        )
-        .expect("The specified defaults should produce a valid config")
-    }
-}
-
-pub struct CompressionIntermediate {
-    pub num_replacements: usize,
-    pub last_symbol: u64,
-    pub replacement_list: ReplacementList,
-    pub compressed: String,
-}
-
-impl CompressionIntermediate {
-    pub fn format_to_string(&self) -> String {
-        match self {
-            CompressionIntermediate {
-                num_replacements,
-                last_symbol,
-                replacement_list,
-                compressed,
-            } => 
-                format!("<meta charset=\"utf-8\"><script>onload=()=>{{let w={replacement_list}.split(\"|\"),h=`{compressed}`;for(i=0;i<{num_replacements};)h=h.replaceAll(\"~\"+String.fromCharCode({last_symbol}-i),w[i++]);document.body.innerHTML=h}};</script>")
-        }
-    }
 }
 
 impl CompressorConfig {
@@ -135,7 +89,7 @@ impl CompressorConfig {
         })
     }
 
-    pub fn greedy(&self, text: String) -> Result<(Vec<Replacement>, String), &'static str> {
+    pub fn greedy(&self, text: &String) -> Result<(Vec<Replacement>, String), &'static str> {
         let mut chosen: Vec<Replacement> = vec![];
         let key_symbols = self.start..self.end;
         let mut prev_was_disallowed = false;
@@ -231,7 +185,7 @@ impl CompressorConfig {
         Ok((chosen, String::from_iter(chars)))
     }
 
-    pub fn prep_compress(&self, text: String) -> Result<CompressionIntermediate, &'static str> {
+    pub fn prep_compress(&self, text: &String) -> Result<CompressionIntermediate, &'static str> {
         let (replacements, compressed) = match self.greedy(text) {
             Ok(x) => x,
             Err(e) => return Err(e),
@@ -245,20 +199,96 @@ impl CompressorConfig {
             delim: '|',
         };
 
-        Ok(CompressionIntermediate {
+        let result = CompressionIntermediate {
             num_replacements,
             last_symbol,
             replacement_list,
             compressed,
-        })
+        };
+
+        result.check(text).map_err(|()| "Internal error: Decompressing compressed result doesn't match original")?;
+        Ok(result)
     }
 
-    pub fn compress(&self, text: String) -> Result<String, &'static str> {
-        match self.prep_compress(text) {
-            Ok(compr_intermediate) => Ok(compr_intermediate.format_to_string()),
-            Err(e) => Err(e),
+    pub fn compress(&self, text: &String) -> Result<String, &'static str> {
+        self.prep_compress(&text).map(|x| x.format_to_string())
+    }
+}
+
+
+impl Default for CompressorConfig {
+    fn default() -> Self {
+        const START: char = '"'; // inclusive
+        const END: char = SPECIAL; // exclusive
+        const SPECIAL: char = '~';
+        const DISALLOWED: [char; 2] = ['`', '\\'];
+        const WORDLIST_DELIM: char = '|';
+        const MIN_LEN: usize = 3;
+        const MAX_LEN: usize = 50;
+        const NPROC: Option<usize> = None;
+        const ALLOW_OVERLAP: bool = true;
+        const CHECK: bool = false;
+
+        Self::new(
+            START,
+            END,
+            SPECIAL,
+            DISALLOWED.into_iter().collect(),
+            WORDLIST_DELIM,
+            MIN_LEN,
+            MAX_LEN,
+            NPROC,
+            ALLOW_OVERLAP,
+            CHECK,
+        )
+        .expect("The specified defaults should produce a valid config")
+    }
+}
+
+pub struct CompressionIntermediate {
+    pub num_replacements: usize,
+    pub last_symbol: u64,
+    pub replacement_list: ReplacementList,
+    pub compressed: String,
+}
+
+/**
+ * Intermediate, whose contents can be formatted to compressed final output
+ */
+
+impl CompressionIntermediate {
+    pub fn format_to_string(&self) -> String {
+        match self {
+            CompressionIntermediate {
+                num_replacements,
+                last_symbol,
+                replacement_list,
+                compressed,
+            } => 
+                format!("<meta charset=\"utf-8\"><script>onload=()=>{{let w={replacement_list}.split(\"|\"),h=`{compressed}`;for(i=0;i<{num_replacements};)h=h.replaceAll(\"~\"+String.fromCharCode({last_symbol}-i),w[i++]);document.body.innerHTML=h}};</script>")
         }
     }
+
+    pub fn decompress(&self) -> String {
+        let CompressionIntermediate { num_replacements, replacement_list, compressed , ..} = self;
+        let mut compressed_copy = compressed.clone();
+        assert_eq!(*num_replacements, replacement_list.replacements.len());
+        for Replacement { substring, key, .. } in replacement_list.replacements.iter().rev() {
+            if let Some(substring) = substring {
+                compressed_copy = compressed_copy.replace(key, substring);
+            }
+        };
+
+        compressed_copy
+    }
+
+    fn check(&self, original: &String) -> Result<(), ()> {
+        match &self.decompress() == original {
+            true => Ok(()),
+            false => Err(()),
+        }
+    }
+
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -381,7 +411,7 @@ mod test {
     #[test]
     fn test_greedy_decompress() {
         let res = CompressorConfig::default()
-            .greedy(RESUME_NO_DOCTYPE.to_string())
+            .greedy(&RESUME_NO_DOCTYPE.to_string())
             .unwrap();
         let (choices, compressed) = res;
         assert_eq!(compressed, REF_COMPRESSED_BODY);
@@ -1060,7 +1090,7 @@ mod test {
     #[test]
     fn test_compress() {
         let computed = CompressorConfig::default()
-            .compress(RESUME_NO_DOCTYPE.to_string())
+            .compress(&RESUME_NO_DOCTYPE.to_string())
             .unwrap();
         let expected = REF_COMPRESSED_HTML.to_string();
         assert_eq!(computed, expected)

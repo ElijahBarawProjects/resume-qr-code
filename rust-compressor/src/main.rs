@@ -172,6 +172,7 @@ fn run(args: Args) -> io::Result<()> {
 
     // Extract compressible content
     let text = extract_compressible_content(&html);
+    let text = text.to_string();
 
     if args.verbose {
         eprintln!("Extracted {} characters for compression", text.len());
@@ -179,7 +180,7 @@ fn run(args: Args) -> io::Result<()> {
 
     let start = std::time::Instant::now();
     let compressed_intermediate = config
-        .prep_compress(text.to_string())
+        .prep_compress(&text)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     if args.verbose {
