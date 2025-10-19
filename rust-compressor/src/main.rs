@@ -5,7 +5,7 @@ use std::{
     io::{self, Read, Write},
 };
 
-use rolling_hash_rs::compressor;
+use rolling_hash_rs::compressor::{self, CompressionIntermediate};
 
 /// HTML compression tool using greedy substring replacement algorithm
 #[derive(Parser, Debug)]
@@ -54,6 +54,14 @@ struct Args {
     /// Number of threads to use for parallel processing (default: number of CPUs)
     #[arg(long)]
     nproc: Option<usize>,
+
+    /// Output parts (wordlist and body) separately instead of final HTML
+    #[arg(long)]
+    parts: bool,
+
+    /// File to write parts output to (required if --parts is set)
+    #[arg(long, required_if_eq("parts", "true"))]
+    parts_out: Option<String>,
 }
 
 use crate::compressor::CompressorConfig;
@@ -141,8 +149,22 @@ fn get_io(args: &Args) -> io::Result<(Box<dyn Read>, Box<dyn Write>)> {
 }
 
 fn run(args: Args) -> io::Result<()> {
-    let config = CompressorConfig::try_from(&args).unwrap();
+    let config = match CompressorConfig::try_from(&args) {
+        Ok(config) => config,
+        Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidInput, e)),
+    };
     let (mut input_stream, mut output_stream) = get_io(&args)?;
+
+    let parts_out_stream = match (args.parts, args.parts_out) {
+        (false, _) => None,
+        (true, None) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "parts flag present without parts_out",
+            ))
+        }
+        (true, Some(path)) => Some(Box::new(File::create(path)?)),
+    };
 
     // Read input HTML
     let mut html = String::new();
@@ -155,12 +177,9 @@ fn run(args: Args) -> io::Result<()> {
         eprintln!("Extracted {} characters for compression", text.len());
     }
 
-    // Note: The current compressor doesn't expose the config options yet
-    // In a future iteration, we would pass the config to a configurable compressor
-    // For now, we'll use the existing compress function
     let start = std::time::Instant::now();
-    let compressed = config
-        .compress(text.to_string())
+    let compressed_intermediate = config
+        .prep_compress(text.to_string())
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     if args.verbose {
@@ -171,7 +190,22 @@ fn run(args: Args) -> io::Result<()> {
     }
 
     // Write compressed output
-    output_stream.write_all(compressed.as_bytes())?;
+    output_stream.write_all(compressed_intermediate.format_to_string().as_bytes())?;
+
+    if args.parts {
+        // Write intermediate output
+        let CompressionIntermediate {
+            num_replacements,
+            last_symbol,
+            replacement_list,
+            compressed,
+        } = compressed_intermediate;
+        let mut parts_out = parts_out_stream.unwrap();
+        write!(
+            parts_out,
+            "{num_replacements}\n{last_symbol}\n{replacement_list}\n`{compressed}`"
+        )?;
+    }
 
     if args.verbose {
         eprintln!("\nCompressed HTML written to output");

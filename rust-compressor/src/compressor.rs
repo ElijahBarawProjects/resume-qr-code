@@ -3,7 +3,6 @@ use std::{
     hash::{BuildHasher, Hasher},
 };
 
-
 use crate::{
     interface::WindowHasher,
     optimal_substring::{best_substring_and_longest_gt_one, BestSubstringRes},
@@ -81,6 +80,27 @@ impl Default for CompressorConfig {
             CHECK,
         )
         .expect("The specified defaults should produce a valid config")
+    }
+}
+
+pub struct CompressionIntermediate {
+    pub num_replacements: usize,
+    pub last_symbol: u64,
+    pub replacement_list: ReplacementList,
+    pub compressed: String,
+}
+
+impl CompressionIntermediate {
+    pub fn format_to_string(&self) -> String {
+        match self {
+            CompressionIntermediate {
+                num_replacements,
+                last_symbol,
+                replacement_list,
+                compressed,
+            } => 
+                format!("<meta charset=\"utf-8\"><script>onload=()=>{{let w={replacement_list}.split(\"|\"),h=`{compressed}`;for(i=0;i<{num_replacements};)h=h.replaceAll(\"~\"+String.fromCharCode({last_symbol}-i),w[i++]);document.body.innerHTML=h}};</script>")
+        }
     }
 }
 
@@ -211,20 +231,33 @@ impl CompressorConfig {
         Ok((chosen, String::from_iter(chars)))
     }
 
-    pub fn compress(&self, text: String) -> Result<String, &'static str> {
-        let (replacements, compressed) = self.greedy(text)?;
+    pub fn prep_compress(&self, text: String) -> Result<CompressionIntermediate, &'static str> {
+        let (replacements, compressed) = match self.greedy(text) {
+            Ok(x) => x,
+            Err(e) => return Err(e),
+        };
 
         let num_replacements = replacements.len();
         let last_symbol = (replacements.last().unwrap().symbol) as u64;
 
-        let replacement_list = &ReplacementList {
+        let replacement_list = ReplacementList {
             replacements,
             delim: '|',
         };
 
-        Ok(format!(
-        "<meta charset=\"utf-8\"><script>onload=()=>{{let w={replacement_list}.split(\"|\"),h=`{compressed}`;for(i=0;i<{num_replacements};)h=h.replaceAll(\"~\"+String.fromCharCode({last_symbol}-i),w[i++]);document.body.innerHTML=h}};</script>",
-    ))
+        Ok(CompressionIntermediate {
+            num_replacements,
+            last_symbol,
+            replacement_list,
+            compressed,
+        })
+    }
+
+    pub fn compress(&self, text: String) -> Result<String, &'static str> {
+        match self.prep_compress(text) {
+            Ok(compr_intermediate) => Ok(compr_intermediate.format_to_string()),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -313,7 +346,7 @@ fn decompress(mut text: String, choices: Vec<Replacement>) -> String {
     text
 }
 
-struct ReplacementList {
+pub struct ReplacementList {
     replacements: Vec<Replacement>,
     delim: char,
 }

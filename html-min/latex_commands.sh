@@ -71,4 +71,14 @@ sed -i '' 's/<div class="center">/<center>/g; s/<\/div>/<\/center>/g' "$resume_p
 echo "Custom minify. Size: $(wc -c < "$resume_path")"
 
 # Custom JS based compression
-python3 "$python_dir/optimize_compression.py" --input="$resume_path" --output="$resume_min_path" && echo "JS Based Approach. Size: $(wc -c < "$resume_min_path")"
+rust_dir="$SCRIPT_DIR/../rust-compressor"
+rust_executable="$rust_dir/target/release/rolling_hash_rs"
+tmp_file="$resume_path.parts.txt"
+cd "$rust_dir" && cargo build --release && cd - && "$rust_executable" --input-file="$resume_path" --output-file="$resume_min_path" --parts --parts-out="$tmp_file" && echo "Rust Approach. Size: $(wc -c < "$resume_min_path")"
+# python3 "$python_dir/optimize_compression.py" --input="$resume_path" --output="$resume_min_path" && echo "JS Based Approach. Size: $(wc -c < "$resume_min_path")"
+
+# reg-pack JS compression (introduces non-ascii bytes)
+node "$python_dir/regpack-final.js" "$tmp_file" "$SCRIPT_DIR/out/resume.regpack.html" "$SCRIPT_DIR/out/resume-qr.png"
+
+# clean up
+rm "$tmp_file"
