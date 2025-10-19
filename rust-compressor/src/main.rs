@@ -13,9 +13,14 @@ fn _main() -> std::io::Result<()> {
     let out_name = &args[2];
     let mut text = String::new();
     File::open(in_name)?.read_to_string(&mut text).unwrap();
+    // strip head
+    let text = text
+        .strip_prefix("<!doctypehtml><meta charset=\"utf-8\">")
+        .and_then(|s| Some(s.to_string()))
+        .unwrap_or(text);
 
     let start = std::time::Instant::now();
-    let (_replacements, compressed) = compressor::greedy(text).unwrap();
+    let compressed = compressor::compress(text).unwrap();
     println!("Greedy in {}", start.elapsed().as_millis());
 
     let mut out_file = File::create(out_name)?;
