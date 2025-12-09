@@ -6,3 +6,9 @@
 # Added by cargo
 
 /target
+
+# added by latex workshop
+
+*.fdb_latexmk
+*.fls
+*.synctex.gz
