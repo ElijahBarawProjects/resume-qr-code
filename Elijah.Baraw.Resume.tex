@@ -1,12 +1,109 @@
 \documentclass[fontsize=12pt]{scrartcl}
 \usepackage[T1]{fontenc}
 \usepackage{ebgaramond}
-\usepackage[top=0.75in, bottom=0.75in, left=0.5in, right=0.5in]{geometry}
+\usepackage[top=0.75in, bottom=0.5in, left=0.5in, right=0.5in]{geometry}
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{amssymb}
+\usepackage{keyval}
+
+%% Definitions
+
+%% Experiences
+
+\newcommand{\epicsys}{
+    {\large\textbf{Epic Systems}} \hfill \textbf{Madison, WI} \\
+    \textbf{Software Engineer} \hfill \textbf{June 2025 -- Present}
+    \begin{itemize}
+        \item Built LLM gateway service integrating LiteLLM to provide unified interface for multiple AI model providers
+        \item Configured Grafana dashboards and Prometheus metrics and alerts for monitoring AI platform microservices
+        \item Managed cloud infra using Terraform, debugged production issues across distributed services
+    \end{itemize}
+}
+
+\newcommand{\research}{
+    {\large\textbf{Center for Atmospheric Particle Studies}} \hfill \textbf{Pittsburgh, PA} \\
+    \textbf{Research Assistant} \hfill \textbf{May 2022 -- Aug 2022}
+    \begin{itemize}
+        \item Developed a low cost device for measuring PM2.5 air pollutants collected on a foam tape over several months
+        \item Implemented an image processing pipeline as a cheaper alternative to traditional particle detection machines
+        \item Integrated a system of Arduino and Python scripts to control stepper motors based on continuous CV input.
+    \end{itemize}
+}
+
+%% Projects
+
+\newcommand{\matmul}{
+    \textbf{Strassen-Winograd Matrix Multiply for GPUs} {\small\textit{CUDA, C++, Nsight}} \hfill \textbf{Jan 2025 -- May 2025}
+    \begin{itemize}
+        \item Implemented $O(n^{2.8})$ matmul on NVIDIA RTX 2080 and V100 GPUs, outperforming cuBLAS  for $n \geq 4096$
+        \item Designed custom CUDA kernels, tuning via programatic search over parameter space
+        \item Reduced memory overhead from 2x to 1.5x through strategic intermediate result reuse and pointer swapping
+    \end{itemize}
+}
+
+\newcommand{\kernel}{
+    \textbf{x86 IA-32 Kernel from Scratch} {\small\textit{C, ASM, Simics}} \hfill \textbf{Aug 2024 -- Dec 2024}
+    \begin{itemize}
+        \item Built a complete i386 kernel from scratch, solo, for CMU 15410, implementing preemptive multitasking
+        \item Engineered hardware interfaces, memory management, and I/O system for concurrent ELF binary execution
+    \end{itemize}
+}
+
+\newcommand{\betlang}{
+    \textbf{BET Programming Language \& Compiler} {\small\textit{Rust, ASM}} \hfill \textbf{Aug 2024 -- Dec 2024}
+    \begin{itemize}
+        \item Designed type- and memory-safe language with structs, mutually-recursive types, and function pointers
+        \item Built compiler in Rust (lexer, parser, type checker, x86 codegen) targeting MacOS and Linux
+        \item Re-architected from recursive to stack-based to compile million-line programs without a stack overflow
+        % \item Demonstrated turing-completeness of language by implementing Conway's Game of Life
+    \end{itemize}
+}
+
+\newcommand{\pokerbots}{
+    \textbf{Poker-Bots Hackathon Dev Team} {\small\textit{GCP, K8s, GitHub Actions}} \hfill \textbf{Mar 2024; Mar 2025}
+    \begin{itemize}
+        \item Helped CMU Data Science Club run their first AI Poker-Bot competition, with \$6,000 in prizes and 63 teams.
+        \item Used GitHub Actions to automatically build Docker images of user-submitted Python bots, allowing competitors to use custom dependencies and machine learning libraries of their choice, running containers on GCP\@.
+        \item Helped build the second iteration of the competition in 2025 using AWS ECS for bots, Lambda for matches
+    \end{itemize}
+}
+
+\newcommand{\distributed}{
+    \textbf{Distributed Backend (Golang)} {\small\textit{Replication, Actor Model, Mailbox/Message Passing}} \hfill \textbf{Nov 2023}
+    \begin{itemize}
+        \item Designed and executed a concurrent server to manage the state for a multiplayer game, accessible via API\@.
+        \item Handled client requests about and updates to the game state using RPCs and a message-passing model.
+        \item Implemented node launching and server groups, ensuring replication and enforcing consistency within groups.
+    \end{itemize}
+}
+
+\newcommand{\proxyserver}{
+    \textbf{Concurrent Proxy Server (C)} {\small\textit{Git, HTTP, Sockets}} \hfill \textbf{July 2023}
+    \begin{itemize}
+        \item Developed a proxy server in C using p\_threads and fork to handle requests concurrently, anonymize traffic and cache responses. Utilized Unix sockets and a bounded cache following an LRU eviction policy.
+    \end{itemize}
+}
+
+\newcommand{\fontify}{
+    \textbf{Fontify (Solo Python Project)} {\small\textit{PIL, Image Processing, De-Noising, Computer Vision}} \hfill \textbf{Jan 2022 -- July 2022}
+    \begin{itemize}
+        \item Created image processing software in Python to convert handwritten letters into a personalized bitmap font.
+        \item Utilized image processing, edge-detection, noise reduction algorithms to detect pencil writing on paper.
+    \end{itemize}
+}
+
+%% Skills
+
+\newcommand{\languages}{\textbf{Languages:} C, Python, Rust, Go, SQL, Java, HCL\\}
+\newcommand{\frameworks}{\textbf{Frameworks \& Libraries:} CUDA, NumPy, PyTorch, FastAPI, Spark\\}
+\newcommand{\tools}{\textbf{Tools \& Platforms:} AWS, Docker, K8s, Terraform, Git, GCP, Azure, Grafana, Prometheus\\}
+\newcommand{\tech}{\textbf{Technologies:}  Pandas, OpenCV, Linux, Sockets, Git, AWS, GCP, Azure, K8s, Docker \\}
+\newcommand{\topics}{\textbf{Topics:} Data Structures and Algorithms, Object Oriented Programing, Functional Programming, Systems, \\Consensus Algorithms, Actor Model, Network Protocols, TCP, Cryptographic Algorithms, Machine Learning}
+
+%% Document formatting
 
 % Remove page numbering
 \pagenumbering{gobble}
@@ -43,71 +140,47 @@
 
 \begin{document}
 
-% Header
+%% Header
 \begin{center}
     {\LARGE \textbf{\href{https://www.elijahbaraw.com/}{Elijah Baraw}}} \\
     \vspace{2pt}
     \large{\href{mailto:ebaraw@andrew.cmu.edu?subject=RE:\%20Your\%20Resume}{ebaraw@andrew.cmu.edu} \textbar\space(203) 731-9535 \textbar\space Pittsburgh, PA \textbar\space\href{https://github.com/elijah-bae-raw}{github.com/elijah-bae-raw}}
 \end{center}
-\vspace{-18pt}
-\rule{\textwidth}{0.4pt}
-\vspace{-18pt}
+\vspace{-14pt}
+% \vspace{-18pt}
+% \rule{\textwidth}{0.4pt}
+% \vspace{-18pt}
 
-% Education
+%% Education
 \section{Education}
 \textbf{Carnegie Mellon University, School of Computer Science} \hfill \textbf{Aug 2021 -- May 2025} \\
 \textit{Bachelor of Science in Computer Science. Concentration in Computer Systems} \\
-GPA\@: 3.94. Relevant courses: Machine Learning, Cloud Computing, Distributed Systems, Data Structures and \\ Algorithms, Functional Programming, Systems, Parallel Algorithms, Linear Algebra, Differential Equations, IDL
+GPA\@: 3.94 \\
+Relevant Coursework: Functional Programming, Machine Learning, Distributed Systems, Cloud Computing, \\Parallel Computer Architecture, Operating System Design, Deep Learning
 
-% Technical Skills
-\section{Technical Skills}
-\textbf{Languages:} C, Python, Go, SQL, Java, HCL \\
-\textbf{Technologies:} NumPy, PyTorch, Pandas, OpenCV, Linux, Sockets, Git, AWS, GCP, Azure, K8s, Docker \\
-\textbf{Topics:} Data Structures and Algorithms, Object Oriented Programing, Functional Programming, Systems, \\Consensus Algorithms, Actor Model, Network Protocols, TCP, Cryptographic Algorithms, Machine Learning
-
-% Experience
+%% Experience
 \section{Experience}
-{\large\textbf{Center for Atmospheric Particle Studies}} \hfill \textbf{Pittsburgh, PA} \\
-\textbf{Research Assistant} \hfill \textbf{May 2022 -- Aug 2022}
-\begin{itemize}
-    \item Developed a low cost device for measuring PM2.5 air pollutants collected on a foam tape over several months
-    \item Implemented an image processing pipeline as a cheaper alternative to traditional particle detection machines
-    \item Integrated a system of Arduino and Python scripts to control stepper motors based on continuous CV input.
-\end{itemize}
 
-% Projects
+\epicsys
+
+%% Projects
 \vspace{-12pt} % adjust for the space which the itemize inserts with `after=...`
 \section{Projects}
 
-\textbf{x86 IA-32 Kernel from Scratch} {\small\textit{C, ASM, Simics}} \hfill \textbf{Aug 2024 -- Dec 2024}
-\begin{itemize}
-    \item Built a complete i386 kernel from scratch, solo, for CMU 15410, implementing preemptive multitasking
-    \item Engineered hardware interfaces, memory management, and I/O system for concurrent ELF binary execution
-\end{itemize}
+\matmul
+\kernel
+\betlang
+\pokerbots
+\distributed
+% \proxyserver
+% \fontify
 
-\textbf{Poker-Bots Hackathon Dev Team} {\small\textit{GCP, K8s, GitHub Actions}} \hfill \textbf{Mar 2024; Mar 2025}
-\begin{itemize}
-    \item Helped CMU Data Science Club run their first AI Poker-Bot competition, with \$6,000 in prizes and 63 teams.
-    \item Used GitHub Actions to automatically build Docker images of user-submitted Python bots, allowing competitors to use custom dependencies and machine learning libraries of their choice, running containers on GCP\@.
-    \item Helped build the second iteration of the competition in 2025 using AWS ECS for bots, Lambda for matches
-\end{itemize}
+\vspace{-12pt} % adjust for the space which the itemize inserts with `after=...`
 
-\textbf{Distributed Backend (Golang)} {\small\textit{Replication, Actor Model, Mailbox/Message Passing}} \hfill \textbf{Nov 2023}
-\begin{itemize}
-    \item Designed and executed a concurrent server to manage the state for a multiplayer game, accessible via API\@.
-    \item Handled client requests about and updates to the game state using RPCs and a message-passing model.
-    \item Implemented node launching and server groups, ensuring replication and enforcing consistency within groups.
-\end{itemize}
-
-\textbf{Concurrent Proxy Server (C)} {\small\textit{Git, HTTP, Sockets}} \hfill \textbf{July 2023}
-\begin{itemize}
-    \item Developed a proxy server in C using p\_threads and fork to handle requests concurrently, anonymize traffic and cache responses. Utilized Unix sockets and a bounded cache following an LRU eviction policy.
-\end{itemize}
-
-\textbf{Fontify (Solo Python Project)} {\small\textit{PIL, Image Processing, De-Noising, Computer Vision}} \hfill \textbf{Jan 2022 -- July 2022}
-\begin{itemize}
-    \item Created image processing software in Python to convert handwritten letters into a personalized bitmap font.
-    \item Utilized image processing, edge-detection, noise reduction algorithms to detect pencil writing on paper.
-\end{itemize}
+%% Technical Skills
+\section{Technical Skills}
+\languages
+\frameworks
+\tools
 
 \end{document}
